@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "cf:build": "cd frontend && VITE_IMG_BASE=https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd/images/ VITE_GIF_BASE=https://cdn.jsdelivr.net/gh/hasaneyldrm/exercises-dataset@7455efae41b330c265e7cd4b78dfa848e7ce5ebd/videos/ npm run build",
+    "cf:deploy": "npm run cf:build && wrangler deploy",
+    "sync:check": "node scripts/check-git-sync.mjs && node --test scripts/git-sync.test.mjs"
+  },
   "devDependencies": {
     "js-yaml": "^4.1.0"
   }

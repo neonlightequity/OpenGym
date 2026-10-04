@@ -1,0 +1,27 @@
+{
+  "description": "Shared Claude/Codex Git startup and exit checks; see GIT_SYNC.md.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const cp=require('node:child_process');const p=require('node:path');const u=require('node:url');const r=cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'}).trim();process.argv[2]='hook-start';import(u.pathToFileURL(p.join(r,'scripts/git-sync.mjs')).href).then(m=>m.main())\"",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const cp=require('node:child_process');const p=require('node:path');const u=require('node:url');const r=cp.execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'}).trim();process.argv[2]='hook-end';import(u.pathToFileURL(p.join(r,'scripts/git-sync.mjs')).href).then(m=>m.main())\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

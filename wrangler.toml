@@ -1,0 +1,20 @@
+# Cloudflare deployment of openGym at gym.davidovichequity.com (fork-owned; see CLOUDFLARE.md).
+# Build the frontend first (npm run cf:build), then `npx wrangler deploy`.
+name = "opengym"
+main = "cloudflare/worker.js"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# custom_domain creates the proxied DNS record and certificate on the davidovichequity.com zone.
+routes = [
+  { pattern = "gym.davidovichequity.com", custom_domain = true }
+]
+
+[assets]
+directory = "frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+[observability]
+enabled = true

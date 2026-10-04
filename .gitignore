@@ -21,3 +21,13 @@ node_modules
 junit.xml
 coverage/
 frontend/bundle-size.json
+
+# Cloudflare fork (gym.davidovichequity.com) — agent config is shared, local overrides are not
+!.claude/
+.claude/*
+!.claude/settings.json
+.wrangler/
+.dev.vars
+.superpowers/
+.worktrees/
+.playwright-mcp/
