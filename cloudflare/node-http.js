@@ -2,10 +2,11 @@
 // built from a fetch Request and resolving to a fetch Response.
 import { EventEmitter } from 'node:events';
 import { Buffer } from 'node:buffer';
+import { Writable } from 'node:stream';
 
 // The body is already in memory (the Durable Object read it), so it is handed over in one
-// 'data' event. It is emitted only once a reader is listening: readBody() attaches its
-// listeners inside the route, after the route has awaited other things.
+// 'data' event. It is emitted only once a reader is listening: readBody() and media.js attach
+// their listeners inside the route, after the route has awaited other things.
 class Req extends EventEmitter {
   constructor(request, url, body, ip) {
     super();
@@ -26,7 +27,9 @@ class Req extends EventEmitter {
       this.flushed = true;
       setTimeout(() => {
         if (this.destroyed) return;
-        if (this.body.byteLength) this.emit('data', Buffer.from(this.body));
+        // A view, not a copy: an upload may be tens of MB in a 128 MB isolate.
+        if (this.body.byteLength) this.emit('data', Buffer.from(this.body.buffer, this.body.byteOffset, this.body.byteLength));
+        if (this.destroyed) return;
         this.readableEnded = true;
         this.emit('end');
       }, 0);
@@ -42,20 +45,21 @@ class Req extends EventEmitter {
   destroy() { this.destroyed = true; this.emit('close'); return this; }
 }
 
-class Res extends EventEmitter {
+// A real Writable, so stream.pipeline() can write a file into it (sendMediaFile).
+class Res extends Writable {
   constructor(resolve) {
     super();
     this.statusCode = 200;
     this.headersSent = false;
-    this.writableEnded = false;
-    this.headers = new Map();
+    this.answered = false;
+    this.headerMap = new Map();
     this.chunks = [];
-    this.resolve = resolve;
+    this.resolveResponse = resolve;
   }
-  setHeader(k, v) { this.headers.set(k.toLowerCase(), v); return this; }
-  getHeader(k) { return this.headers.get(k.toLowerCase()); }
-  removeHeader(k) { this.headers.delete(k.toLowerCase()); }
-  hasHeader(k) { return this.headers.has(k.toLowerCase()); }
+  setHeader(k, v) { this.headerMap.set(k.toLowerCase(), v); return this; }
+  getHeader(k) { return this.headerMap.get(k.toLowerCase()); }
+  removeHeader(k) { this.headerMap.delete(k.toLowerCase()); }
+  hasHeader(k) { return this.headerMap.has(k.toLowerCase()); }
   writeHead(code, msg, headers) {
     if (typeof msg === 'object' && msg) headers = msg;
     this.statusCode = code;
@@ -64,28 +68,29 @@ class Res extends EventEmitter {
     this.headersSent = true;
     return this;
   }
-  write(chunk) {
+  _write(chunk, enc, cb) {
     this.headersSent = true;
-    if (chunk != null) this.chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk));
-    return true;
+    this.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, enc));
+    cb();
   }
-  end(chunk) {
-    if (this.writableEnded) return this;
-    if (chunk != null && typeof chunk !== 'function') this.write(chunk);
+  _final(cb) {
     this.headersSent = true;
-    this.writableEnded = true;
+    this.answer(Buffer.concat(this.chunks));
+    cb();
+  }
+  answer(body) {
+    if (this.answered) return;
+    this.answered = true;
     const h = new Headers();
     // Several Set-Cookie values (session + cleared legacy cookie) must stay separate headers.
-    for (const [k, v] of this.headers) for (const one of [].concat(v)) h.append(k, String(one));
+    for (const [k, v] of this.headerMap) for (const one of [].concat(v)) h.append(k, String(one));
     const noBody = this.statusCode === 204 || this.statusCode === 304;
-    this.resolve(new Response(noBody ? null : Buffer.concat(this.chunks), { status: this.statusCode, headers: h }));
-    this.emit('finish');
-    this.emit('close');
-    return this;
+    this.resolveResponse(new Response(noBody ? null : body, { status: this.statusCode, headers: h }));
   }
-  destroy() {
-    if (!this.writableEnded) { this.writableEnded = true; this.resolve(new Response(null, { status: 500 })); }
-    this.emit('close');
+  _destroy(err, cb) {
+    // Destroyed before it finished (a download that failed midway): there is no complete answer.
+    if (!this.answered) { this.answered = true; this.resolveResponse(new Response(null, { status: 500 })); }
+    cb(err);
   }
 }
 
@@ -99,6 +104,6 @@ export async function runNodeHandler(handle, request, body, ip) {
   const res = new Res(resolve);
   try { await handle(req, res); }
   catch (e) { console.error('unhandled', e); }
-  if (res.writableEnded) return answered;
+  if (res.writableEnded || res.answered) return answered;
   return new Response(JSON.stringify({ error: 'server error' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 }

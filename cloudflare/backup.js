@@ -12,9 +12,10 @@ export const VERSION = 1;
 export const DAILY_KEEP = 30;
 export const MONTHLY_KEEP = 12;
 
-// Reads every stored file. Synchronous: call it with no await in between.
+// Reads every stored text file. Synchronous: call it with no await in between. Uploaded media
+// (binary, under /data/uploads/) are not included: they are mirrored to R2 by mirrorMedia().
 export function snapshot(fs) {
-  const files = fs.listFiles().map(f => ({ name: f.name, mtime: f.mtime, text: fs.readFileSync(f.name, 'utf8') }));
+  const files = fs.listFiles().filter(f => !f.bin && !f.name.startsWith('/data/uploads/')).map(f => ({ name: f.name, mtime: f.mtime, text: fs.readFileSync(f.name, 'utf8') }));
   return { format: FORMAT, version: VERSION, createdAt: new Date().toISOString(), files };
 }
 
@@ -85,6 +86,28 @@ export function bumpSessions(restoredDbText, currentDbText) {
   const was = new Map((current.users || []).map(u => [u.id, u.sv || 0]));
   for (const u of restored.users || []) u.sv = Math.max(u.sv || 0, was.get(u.id) || 0) + 1;
   return JSON.stringify(restored, null, 2);
+}
+
+// Copies every stored upload to media/<uid>/<hash>.<ext> in the bucket, unless it is already
+// there. Uploads are named by their SHA-256, so an object under a name never changes, and one
+// already present needs no second copy. Mirrored objects are kept when the upload is deleted.
+const MEDIA_FILE = /^([A-Za-z0-9_-]+)\/([0-9a-f]{64}\.(?:jpg|png|webp|gif|mp4|mov|webm))$/;
+export async function mirrorMedia(bucket, fs, uploadsDir) {
+  const out = { copied: 0, present: 0, bytes: 0 };
+  const prefix = uploadsDir.replace(/\/+$/, '') + '/';
+  for (const f of fs.listFiles()) {
+    if (!f.bin || !f.name.startsWith(prefix)) continue;
+    const m = MEDIA_FILE.exec(f.name.slice(prefix.length));
+    if (!m) continue;   // .tmp/ and anything that is not a finished upload
+    const key = `media/${m[1]}/${m[2]}`;
+    if (await bucket.head(key)) { out.present++; continue; }
+    const bytes = fs.readBytes(f.name);
+    if (!bytes) continue;   // deleted since the listing
+    await bucket.put(key, bytes, { customMetadata: { uid: m[1], mtime: String(f.mtime) } });
+    out.copied++;
+    out.bytes += bytes.length;
+  }
+  return out;
 }
 
 export const stampKey = (prefix, snap) => `${prefix}/${snap.createdAt.replace(/[:.]/g, '-')}.json.gz`;

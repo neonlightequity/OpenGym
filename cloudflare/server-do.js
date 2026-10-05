@@ -7,9 +7,12 @@ import { createDoFs } from './do-fs.js';
 import { generateVAPIDKeysAsync } from './web-push.js';
 import { runNodeHandler } from './node-http.js';
 import * as backup from './backup.js';
+import { mediaLimits } from '../api/media.js';
 
 const DATA_DIR = '/data';
 const MAX_BODY = 5 * 1024 * 1024;   // api/server.js MAX_BODY
+const MEDIA_PUT = /^\/api\/media\/[0-9a-f]{64}$/;
+const UPLOADS = `${DATA_DIR}/uploads`;
 const TICK_MS = 60000;              // reminders are owed for 15 minutes after their time
 
 // The request body, or null once it passes `cap` — read as a stream so a body sent without a
@@ -65,14 +68,21 @@ export class OpenGymServer extends DurableObject {
       }
     };
 
+    // An upload may be larger than any JSON body; media.js answers an oversized one itself, so
+    // the cap here is twice the largest media cap, as its own drain() allows.
+    const L = mediaLimits(process.env);
+    this.mediaCap = L.enabled ? 2 * Math.ceil(Math.max(L.imageMB, L.gifMB, L.videoMB) * 1024 * 1024) : 0;
+
     this.api = await import('../api/server.js');
   }
 
   async fetch(request) {
     await this.boot;
+    const path = new URL(request.url).pathname;
+    const cap = request.method === 'PUT' && MEDIA_PUT.test(path) && this.mediaCap ? this.mediaCap : 2 * MAX_BODY;
     const declared = +(request.headers.get('content-length') || 0);
-    if (declared > 2 * MAX_BODY) return Response.json({ error: 'body too large' }, { status: 413 });
-    const body = await readBody(request, 2 * MAX_BODY);
+    if (declared > cap) return Response.json({ error: 'body too large' }, { status: 413 });
+    const body = await readBody(request, cap);
     if (!body) return Response.json({ error: 'body too large' }, { status: 413 });
     const ip = request.headers.get('cf-connecting-ip') || '';
     const res = await runNodeHandler(this.api.handle, request, body, ip);
@@ -97,6 +107,7 @@ export class OpenGymServer extends DurableObject {
   async scheduledBackup() {
     await this.boot;
     const result = await backup.scheduled(this.env.BACKUPS, backup.snapshot(this.fs));
+    result.media = await backup.mirrorMedia(this.env.BACKUPS, this.fs, UPLOADS);
     console.log('backup', JSON.stringify(result));
     return result;
   }
@@ -137,7 +148,9 @@ export class OpenGymServer extends DurableObject {
     const dbName = `${DATA_DIR}/db.json`;
     const currentDb = before.files.find(f => f.name === dbName)?.text;
     const files = snap.files.map(f => (f.name === dbName ? { ...f, text: backup.bumpSessions(f.text, currentDb) } : f));
-    this.fs.replaceAll(files, [`${DATA_DIR}/secret`]);
+    // Uploaded media are not in JSON backups (they are mirrored to R2 separately), so the ones
+    // stored now stay; media.js forgets nothing, and a file no state references is swept later.
+    this.fs.replaceAll(files, [`${DATA_DIR}/secret`], [UPLOADS]);
     this.api.reloadData();
     this.ctx.storage.sql.exec('DELETE FROM rest_timers');
     console.log('restored', key, 'previous data saved at', saved.key);

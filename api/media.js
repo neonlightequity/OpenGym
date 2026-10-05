@@ -24,7 +24,7 @@
  *   is in the caller's own folder, so there is no way to learn whether someone else has a file.
  */
 import crypto from 'node:crypto';
-import fs from 'node:fs';
+import fs from './fs.js';
 import path from 'node:path';
 
 export const HASH_RE = /^[0-9a-f]{64}$/;

@@ -19,11 +19,18 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   one at a time, `db` stays in memory while the object is alive, and Durable Object SQLite
   writes are synchronous. `api/server.js` imports `fs` from `api/fs.js`. That module is
   `node:fs` on Node and `cloudflare/do-fs.js` in the Worker. The rest of server.js is upstream code.
-- **Seams in `api/server.js`** (keep them when merging upstream): the `./fs.js` import;
+- **Seams in `api/server.js` and `api/media.js`** (keep them when merging upstream): both import
+  `fs` from `./fs.js`;
   `reminderTick()` exported instead of an inline `setInterval` callback; `reloadData()`; the
   `globalThis.__opengymRestTimers` hook in `scheduleRestTimer`/`cancelRestTimer`;
   `fireRestTimer`, `hasPushSubscribers` and `handle` exported; `listen` skipped when
   `globalThis.__opengymHost` is set. `api/Dockerfile` copies `fs.js`.
+- **Custom-exercise media** run through upstream's `media.js` unchanged: hash check, type
+  sniffing, MP4 duration, per-profile quota, and the grace-period sweep. Bytes are binary files in
+  the same Durable Object storage (1 MB BLOB chunks; `do-fs.js` also emulates directories, file
+  descriptors and streams for it). An upload is held in memory whole, so `MEDIA_VIDEO_MAX_MB` is
+  16, not upstream's 40. The Durable Object accepts media bodies up to twice the largest cap so
+  `media.js` can answer an oversized one itself.
 - **Timers.** Durable Objects are evicted when idle, so in-memory timers cannot be relied on.
   Rest-timer pushes are rows in the `rest_timers` table. The reminder tick runs from the
   object's alarm every minute while anyone has a push subscription. The alarm is re-armed
@@ -49,13 +56,17 @@ Git. It is backed up to R2 (next section).
 
 ## Backups
 
-- **What:** a consistent snapshot of every stored file, taken inside the Durable Object with
+- **What:** a consistent snapshot of every stored text file (uploaded media excluded, see below), taken inside the Durable Object with
   no request in between, gzipped as one JSON object (`cloudflare/backup.js`), in the private
   R2 bucket `opengym-backups` (binding `BACKUPS`). Backups hold passkey public keys, the
   session secret and the VAPID private key. Never make the bucket public.
 - **When:** daily cron at 03:17 UTC writes `daily/<time>.json.gz` (newest 30 kept), plus
   `monthly/<YYYY-MM>.json.gz` on a month's first run (newest 12 kept). `manual/` and
   `pre-restore/` objects are never pruned.
+- **Media** are copied by the same nightly run to `media/<uid>/<sha256>.<ext>`, each only once
+  because names are content hashes. Mirrored copies are kept after the upload is deleted. A
+  restore leaves the uploads currently stored in place (JSON backups do not carry them).
+  Restoring media from R2 has no command yet (see `ToDo.md`).
 - **Operator routes** `/__ops/backups` (GET), `/__ops/backup` (POST) and
   `/__ops/restore?key=…` (POST) require `Authorization: Bearer <OPS_TOKEN>`. They answer 404
   without it, and also when the secret is unset. On the MacBook the token is in
@@ -77,15 +88,14 @@ Git. It is backed up to R2 (next section).
 
 `wrangler.toml` `[vars]`: `RP_ID`, `ORIGIN` (both must be the exact production host, because
 passkeys are bound to it), `VAPID_SUBJECT`, `TRUST_PROXY=1` (the Worker sets `X-Forwarded-For`
-from `CF-Connecting-IP`), `COACH_DISABLED=1`, `MEDIA_UPLOADS=off`. All other variables in
+from `CF-Connecting-IP`), `ADMIN_UIDS`, `INVITE_ONLY=1`, `COACH_DISABLED=1`, `MEDIA_UPLOADS=on`,
+`MEDIA_VIDEO_MAX_MB=16`. All other variables in
 `docs/SELF_HOSTING.md` work the same way (`INVITE_ONLY`, `ADMIN_UIDS`, `ALLOW_GUEST`,
 `PASSWORD_LOGIN`, `SESSION_DAYS`, `AUDIT_*`, `DEFAULT_LANG`). Changing one is a deploy.
 
 Disabled on Workers:
 - **AI Coach**: upstream runs a local agent process or calls providers with keys stored on
   disk.
-- **Custom-exercise photos/videos** (`/api/media/*`): these need a file store; R2 is the
-  planned port.
 
 ## Commands
 
@@ -95,6 +105,7 @@ Disabled on Workers:
 | `npm run cf:build` | Build `frontend/dist` with exercise media from the pinned jsDelivr dataset |
 | `cp .dev.vars.example .dev.vars && npm run cf:dev` | Local Worker at http://localhost:8787 with persistent local storage in `.wrangler/state` |
 | `node cloudflare/smoke.mjs http://localhost:8787` | Full API smoke test (needs `PASSWORD_LOGIN=1`, as in `.dev.vars.example`) |
+| `node cloudflare/media-smoke.mjs http://localhost:8787` | Upload, dedupe, download, caps, missing and sweep for custom-exercise media |
 | `node cloudflare/smoke.mjs https://gym.davidovichequity.com --public` | Read-only production smoke test |
 | `npm run test:cf` | Web Push interoperability and backup format/retention tests (Web Push decrypts with `http_ece` from `api/node_modules`) |
 | `OPS_TOKEN=… node cloudflare/ops.mjs list\|backup\|restore <key>` | Backup operations (see Backups) |
