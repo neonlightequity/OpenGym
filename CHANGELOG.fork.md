@@ -43,6 +43,10 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
   share a 48 MB buffer budget (503 past it). Mirrored media are deleted from R2 30 days after
   their upload is gone.
 
+- A request without a session may send at most 64 KB, within 10 s, with at most 8 at a time per
+  address, so the shared buffer budget cannot be held without an account (background security
+  review of `06d35585`).
+
 ### Production deployment
 
 - 2026-10-05: version `06d35585-ae53-40a0-b81c-90ce386f7a58`: session check before upload

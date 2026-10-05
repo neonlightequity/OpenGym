@@ -17,6 +17,12 @@ const UPLOADS = `${DATA_DIR}/uploads`;
 // requests in flight together may hold at most this much; past it a request is refused (503)
 // instead of risking the object being reset with everyone's requests in it.
 const BUFFER_BUDGET = 48 * 1024 * 1024;
+// Without a session, a body is a sign-in, registration or pairing payload of a few KB. Such
+// requests get a small cap, a short deadline and a per-address limit, so nobody can hold the
+// shared budget (and lock out signed-in users) without an account.
+const ANON_CAP = 64 * 1024;
+const ANON_DEADLINE_MS = 10000;
+const ANON_PER_ADDRESS = 8;
 const TICK_MS = 60000;              // reminders are owed for 15 minutes after their time
 
 // The request body, or null once it passes `cap` — read as a stream so a body sent without a
@@ -24,14 +30,22 @@ const TICK_MS = 60000;              // reminders are owed for 15 minutes after t
 // `budget` is shared by every request in flight: { used }. Returns null past `cap`, 'busy'
 // when the shared budget would be exceeded. A body that is returned stays counted until the
 // caller releases it, when its request is done.
-async function readBody(request, cap, budget) {
+async function readBody(request, cap, budget, deadlineMs = 0) {
   if (!request.body) return new Uint8Array(0);
   const reader = request.body.getReader();
   const chunks = []; let size = 0;
   const refuse = result => { reader.cancel().catch(() => {}); budget.used -= size; return result; };
+  const until = deadlineMs ? Date.now() + deadlineMs : 0;
   for (;;) {
-    let step;
-    try { step = await reader.read(); } catch (e) { budget.used -= size; throw e; }
+    let step, timer;
+    try {
+      const next = reader.read();
+      step = until
+        ? await Promise.race([next, new Promise(r => { timer = setTimeout(() => r('late'), Math.max(0, until - Date.now())); })])
+        : await next;
+    } catch (e) { budget.used -= size; throw e; }
+    finally { clearTimeout(timer); }
+    if (step === 'late') return refuse('late');
     if (step.done) break;
     size += step.value.byteLength;
     budget.used += step.value.byteLength;
@@ -49,6 +63,7 @@ export class OpenGymServer extends DurableObject {
     super(ctx, env);
     this.boot = ctx.blockConcurrencyWhile(() => this.start(env));
     this.buffered = { used: 0 };
+    this.anonReads = new Map();   // address -> anonymous bodies being read now
   }
 
   async start(env) {
@@ -91,20 +106,33 @@ export class OpenGymServer extends DurableObject {
   async fetch(request) {
     await this.boot;
     const path = new URL(request.url).pathname;
+    const ip = request.headers.get('cf-connecting-ip') || '';
+    const signedIn = this.api.hasSession(Object.fromEntries(request.headers));
     const upload = request.method === 'PUT' && MEDIA_PUT.test(path) && this.mediaCap > 0;
+    const drop = r => { request.body?.cancel().catch(() => {}); return r; };
     // An upload's large cap is only for a signed-in profile: anyone else is answered before a
     // byte of the body is read (the same 401 the route itself would give).
-    if (upload && !this.api.hasSession(Object.fromEntries(request.headers))) {
-      request.body?.cancel().catch(() => {});
-      return Response.json({ error: 'not signed in' }, { status: 401 });
-    }
-    const cap = upload ? this.mediaCap : 2 * MAX_BODY;
+    if (upload && !signedIn) return drop(Response.json({ error: 'not signed in' }, { status: 401 }));
+    const cap = !signedIn ? ANON_CAP : upload ? this.mediaCap : 2 * MAX_BODY;
     const declared = +(request.headers.get('content-length') || 0);
-    if (declared > cap) return Response.json({ error: 'body too large' }, { status: 413 });
-    const body = await readBody(request, cap, this.buffered);
+    if (declared > cap) return drop(Response.json({ error: 'body too large' }, { status: 413 }));
+    const anonymous = !signedIn && !!request.body;
+    if (anonymous) {
+      const n = this.anonReads.get(ip) || 0;
+      if (n >= ANON_PER_ADDRESS) return drop(Response.json({ error: 'too many requests', code: 'rate' }, { status: 429, headers: { 'Retry-After': '5' } }));
+      this.anonReads.set(ip, n + 1);
+    }
+    let body;
+    try { body = await readBody(request, cap, this.buffered, anonymous ? ANON_DEADLINE_MS : 0); }
+    finally {
+      if (anonymous) {
+        const n = (this.anonReads.get(ip) || 1) - 1;
+        if (n > 0) this.anonReads.set(ip, n); else this.anonReads.delete(ip);
+      }
+    }
     if (!body) return Response.json({ error: 'body too large' }, { status: 413 });
+    if (body === 'late') return Response.json({ error: 'request body took too long' }, { status: 408 });
     if (body === 'busy') return Response.json({ error: 'the server is busy — try again in a moment', code: 'busy' }, { status: 503, headers: { 'Retry-After': '2' } });
-    const ip = request.headers.get('cf-connecting-ip') || '';
     let res;
     try { res = await runNodeHandler(this.api.handle, request, body, ip); }
     finally { this.buffered.used -= body.byteLength; }

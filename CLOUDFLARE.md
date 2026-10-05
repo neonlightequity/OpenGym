@@ -33,6 +33,9 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   `media.js` can answer an oversized one itself. That larger cap applies only to a signed-in
   request: the Durable Object checks the session before reading an upload body. All requests in
   flight may buffer at most 48 MB together; past that a request gets 503 with `Retry-After`.
+  A request without a session may send at most 64 KB, must finish sending it within 10 s (408),
+  and one address may have at most 8 such bodies in flight (429), so the budget cannot be held
+  without an account.
 - **Timers.** Durable Objects are evicted when idle, so in-memory timers cannot be relied on.
   Rest-timer pushes are rows in the `rest_timers` table. The reminder tick runs from the
   object's alarm every minute while anyone has a push subscription. The alarm is re-armed
