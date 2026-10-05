@@ -30,6 +30,10 @@ in `ToDo.md` at the repository root.
 - Two more findings fixed in `4b14f8cc`: anonymous bodies share an 8 MB slice of the budget,
   and an IPv6 /64 counts as one address. Flood test from 200 addresses: 136 held then 408, 63
   answered 503, and a signed-in 1.5 MB sync succeeded meanwhile.
+- Structural fix in `1f91be76`: request bodies are read in the Worker, so slow senders never
+  reach the single Durable Object (flood test: 200/200 stalled bodies → 408 at the Worker, and
+  sign-in, registration and a 1.5 MB sync unaffected). Further availability hardening belongs
+  at the edge (Cloudflare rate-limiting/WAF rules), not in more in-object limits.
 - Open: restoring media from the R2 mirror; the owner trying an upload on a phone; Coach; push
   on a real phone.
 - Commits: `c3c9f4e`..HEAD.
