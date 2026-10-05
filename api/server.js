@@ -2461,6 +2461,22 @@ export async function handle(req, res) {
 }
 // Whether anyone could receive a push — a host that wakes this process on a timer asks first.
 export const hasPushSubscribers = () => db.subs.length > 0;
+// Re-reads what boot read from DATA_DIR, for a host that replaced the files underneath this
+// process (cloudflare/server-do.js restoring a backup). The session secret is not re-read: the
+// host keeps the current one, so signed-in devices stay signed in.
+export function reloadData() {
+  db = { users: [], creds: [], subs: [], invites: [] };
+  try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); } catch {}
+  db.subs = db.subs || [];
+  db.invites = db.invites || [];
+  db.deviceLinks = db.deviceLinks || [];
+  try {
+    vapid = JSON.parse(fs.readFileSync(vapidFile, 'utf8'));
+    webpush.setVapidDetails(VAPID_SUBJECT, vapid.publicKey, vapid.privateKey);
+  } catch (e) { console.error('reload: keeping the current VAPID keys', e.message); }
+  stateCache.clear();
+  if (AUDIT_ON) compactAudit();
+}
 // A host that brings its own front end (cloudflare/server-do.js) imports handle() and listens itself.
 const server = globalThis.__opengymHost ? {} : http.createServer(handle);
 // Node's default of 300 s for a whole request would answer 408 to a 40 MB video on a ~1 Mbit/s

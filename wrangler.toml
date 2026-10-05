@@ -22,6 +22,14 @@ run_worker_first = true
 name = "OPENGYM"
 class_name = "OpenGymServer"
 
+# Backups of the Durable Object's data (cloudflare/backup.js). Private bucket, never public.
+[[r2_buckets]]
+binding = "BACKUPS"
+bucket_name = "opengym-backups"
+
+[triggers]
+crons = ["17 3 * * *"]   # daily backup, 03:17 UTC
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["OpenGymServer"]

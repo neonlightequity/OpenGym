@@ -6,6 +6,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { createDoFs } from './do-fs.js';
 import { generateVAPIDKeysAsync } from './web-push.js';
 import { runNodeHandler } from './node-http.js';
+import * as backup from './backup.js';
 
 const DATA_DIR = '/data';
 const MAX_BODY = 5 * 1024 * 1024;   // api/server.js MAX_BODY
@@ -41,6 +42,7 @@ export class OpenGymServer extends DurableObject {
     process.env.DATA_DIR = DATA_DIR;
 
     const fs = createDoFs(this.ctx.storage);
+    this.fs = fs;
     globalThis.__opengymFs = fs;
     globalThis.__opengymHost = 'cloudflare';
     // web-push makes VAPID keys synchronously on first boot; WebCrypto cannot, so they are made
@@ -88,6 +90,54 @@ export class OpenGymServer extends DurableObject {
     if (this.api.hasPushSubscribers()) sends.push(this.api.reminderTick());
     await Promise.allSettled(sends);
     await this.arm();
+  }
+
+  // Backups (cloudflare/backup.js), called over RPC by the Worker: the daily cron and the
+  // token-protected /__ops routes. Each snapshot is taken with no await in between.
+  async scheduledBackup() {
+    await this.boot;
+    const result = await backup.scheduled(this.env.BACKUPS, backup.snapshot(this.fs));
+    console.log('backup', JSON.stringify(result));
+    return result;
+  }
+
+  async manualBackup() {
+    await this.boot;
+    const snap = backup.snapshot(this.fs);
+    return backup.put(this.env.BACKUPS, backup.stampKey('manual', snap), snap);
+  }
+
+  async listBackups() {
+    const out = [];
+    let cursor;
+    do {
+      const page = await this.env.BACKUPS.list({ cursor, include: ['customMetadata'] });
+      out.push(...page.objects.map(o => ({ key: o.key, bytes: o.size, uploaded: o.uploaded, ...o.customMetadata })));
+      cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    return out;
+  }
+
+  // Replaces all API data with the backup at `key`. The current data is saved under
+  // pre-restore/ first. The session secret stays the current one, so devices stay signed in.
+  async restoreBackup(key) {
+    await this.boot;
+    // Requests wait until the restore is done, so nothing written after the pre-restore
+    // snapshot can be lost by the swap.
+    return this.ctx.blockConcurrencyWhile(() => this.restoreLocked(key));
+  }
+
+  async restoreLocked(key) {
+    const obj = await this.env.BACKUPS.get(key);
+    if (!obj) throw new Error(`no backup at ${key}`);
+    const snap = await backup.decode(new Uint8Array(await obj.arrayBuffer()));
+    const before = backup.snapshot(this.fs);
+    const saved = await backup.put(this.env.BACKUPS, backup.stampKey('pre-restore', before), before);
+    this.fs.replaceAll(snap.files, [`${DATA_DIR}/secret`]);
+    this.api.reloadData();
+    this.ctx.storage.sql.exec('DELETE FROM rest_timers');
+    console.log('restored', key, 'previous data saved at', saved.key);
+    return { restored: key, files: snap.files.length, createdAt: snap.createdAt, previous: saved.key };
   }
 
   // The alarm is set to whichever comes first: the next due rest timer, or the next reminder

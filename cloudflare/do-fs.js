@@ -62,6 +62,17 @@ export function createDoFs(storage) {
       return { size: m.size, mtimeMs: m.mtime, isFile: () => true, isDirectory: () => false };
     },
     // Listing for backups/export.
-    listFiles: () => sql.exec('SELECT name, size, mtime FROM fs_meta ORDER BY name').toArray()
+    listFiles: () => sql.exec('SELECT name, size, mtime FROM fs_meta ORDER BY name').toArray(),
+    // Restoring a backup: every file replaced by `files` ({name, text}), except the names in
+    // `keep`, which stay as they are. One transaction: on any error nothing changes.
+    replaceAll(files, keep = []) {
+      storage.transactionSync(() => {
+        const held = keep.map(name => [name, read(name)]).filter(([, text]) => text != null);
+        sql.exec('DELETE FROM fs_chunks');
+        sql.exec('DELETE FROM fs_meta');
+        for (const f of files) if (!keep.includes(f.name)) write(f.name, f.text);
+        for (const [name, text] of held) write(name, text);
+      });
+    }
   };
 }

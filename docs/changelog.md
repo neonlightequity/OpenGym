@@ -6,6 +6,21 @@ next session can pick up without re-reading the whole git history. See
 `GIT_SYNC.md` item 8. Commit-level detail stays in `git log`; open work goes
 in `ToDo.md` at the repository root.
 
+## 2026-10-04 — Claude Code — MacBook — Backups to R2
+
+- Daily cron backup of all API data to the private R2 bucket `opengym-backups` (30 daily, 12
+  monthly). Token-protected `/__ops` routes and `cloudflare/ops.mjs` list, take and restore
+  backups. Restore is transactional, saves `pre-restore/` first and keeps sessions. Adds a
+  `reloadData()` seam to `api/server.js`. The `OPS_TOKEN` copy on the MacBook is in
+  `.git/opengym-ops-token`.
+- Verified locally: cron → backup → data changed → restore brings back the 3,000 workouts,
+  removes the profile created after the backup, keeps the session, and survives a restart.
+  Unit tests cover the format, malformed backups and retention over 500 days. The API suite
+  is unchanged (same 3 Node 25 failures). Production: Worker `37b6ac6d`; a manual backup
+  (1 user, 5 files) downloaded and decoded; `/__ops` is 404 without the token; public smoke
+  test passed. No restore was run against production.
+- Open: R2 media, Coach, push on a real phone.
+
 ## 2026-10-04 — Claude Code — MacBook — Owner admin, invite-only
 
 - Owner registered (profile `ROFl0cz7ERY2iHBg`). It is now `ADMIN_UIDS`, and `INVITE_ONLY = "1"`

@@ -3,3 +3,7 @@ RP_ID=localhost
 ORIGIN=http://localhost:8787
 VAPID_SUBJECT=mailto:admin@localhost
 PASSWORD_LOGIN=1
+# Production is invite-only with the owner as admin; local dev is open.
+INVITE_ONLY=0
+ADMIN_UIDS=
+OPS_TOKEN=local-ops-token-for-dev-only

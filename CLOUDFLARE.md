@@ -20,7 +20,7 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   writes are synchronous. `api/server.js` imports `fs` from `api/fs.js`. That module is
   `node:fs` on Node and `cloudflare/do-fs.js` in the Worker. The rest of server.js is upstream code.
 - **Seams in `api/server.js`** (keep them when merging upstream): the `./fs.js` import;
-  `reminderTick()` exported instead of an inline `setInterval` callback; the
+  `reminderTick()` exported instead of an inline `setInterval` callback; `reloadData()`; the
   `globalThis.__opengymRestTimers` hook in `scheduleRestTimer`/`cancelRestTimer`;
   `fireRestTimer`, `hasPushSubscribers` and `handle` exported; `listen` skipped when
   `globalThis.__opengymHost` is set. `api/Dockerfile` copies `fs.js`.
@@ -45,7 +45,31 @@ All data is in the Durable Object's SQLite storage (tables `fs_meta`/`fs_chunks`
 split into chunks because a row holds at most 2 MB). The files match a Docker install's
 `./data`: `db.json` (users, passkeys, subscriptions, invites), `state-<uid>.json`, `secret`
 (session HMAC key, generated on first boot), `vapid.json`, `audit.log`. None of it is in
-Git. **Back it up**: the open item in `ToDo.md` covers an export.
+Git. It is backed up to R2 (next section).
+
+## Backups
+
+- **What:** a consistent snapshot of every stored file, taken inside the Durable Object with
+  no request in between, gzipped as one JSON object (`cloudflare/backup.js`), in the private
+  R2 bucket `opengym-backups` (binding `BACKUPS`). Backups hold passkey public keys, the
+  session secret and the VAPID private key. Never make the bucket public.
+- **When:** daily cron at 03:17 UTC writes `daily/<time>.json.gz` (newest 30 kept), plus
+  `monthly/<YYYY-MM>.json.gz` on a month's first run (newest 12 kept). `manual/` and
+  `pre-restore/` objects are never pruned.
+- **Operator routes** `/__ops/backups` (GET), `/__ops/backup` (POST) and
+  `/__ops/restore?key=…` (POST) require `Authorization: Bearer <OPS_TOKEN>`. They answer 404
+  without it, and also when the secret is unset. On the MacBook the token is in
+  `.git/opengym-ops-token` (mode 600, never committed). On another machine, set a new one
+  with `wrangler secret put OPS_TOKEN`.
+- **Use:** `OPS_TOKEN=$(cat .git/opengym-ops-token) node cloudflare/ops.mjs list | backup | restore <key>`.
+  To download one: `npx wrangler r2 object get opengym-backups/<key> --remote --file <name>`
+  (gzip JSON: `{format, version, createdAt, files: [{name, mtime, text}]}`).
+- **Restore** replaces all API data with the backup in one transaction while requests wait. It
+  first saves the current data under `pre-restore/`, reloads it into the running server
+  (`reloadData()` seam), and clears pending rest timers. The current session secret is kept,
+  so signed-in devices stay signed in. Undo a restore by restoring its `pre-restore/` key.
+  Tested end to end locally (`wrangler dev --test-scheduled`). It has not been run against
+  production data.
 
 ## Configuration
 
@@ -70,7 +94,8 @@ Disabled on Workers:
 | `cp .dev.vars.example .dev.vars && npm run cf:dev` | Local Worker at http://localhost:8787 with persistent local storage in `.wrangler/state` |
 | `node cloudflare/smoke.mjs http://localhost:8787` | Full API smoke test (needs `PASSWORD_LOGIN=1`, as in `.dev.vars.example`) |
 | `node cloudflare/smoke.mjs https://gym.davidovichequity.com --public` | Read-only production smoke test |
-| `npm run test:cf` | Web Push interoperability tests (decrypts with `http_ece` from `api/node_modules`) |
+| `npm run test:cf` | Web Push interoperability and backup format/retention tests (Web Push decrypts with `http_ece` from `api/node_modules`) |
+| `OPS_TOKEN=… node cloudflare/ops.mjs list\|backup\|restore <key>` | Backup operations (see Backups) |
 | `cd api && npm test` | Upstream API suite on Node, to confirm the seams did not change behavior |
 
 `cf:dev` passes `--local-upstream localhost:8787`. Without it, wrangler rewrites `Origin` to the

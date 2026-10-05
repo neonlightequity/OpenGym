@@ -25,7 +25,18 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 - Shared Claude/Codex Git synchronization (`GIT_SYNC.md`, `scripts/git-sync.mjs`, hooks),
   `AGENTS.md`, `ToDo.md`, `docs/changelog.md`.
 
+- Backups: a daily cron (03:17 UTC) snapshots all API data into the private R2 bucket
+  `opengym-backups` (newest 30 daily and 12 monthly kept). `cloudflare/ops.mjs` lists, takes
+  and restores backups through `/__ops/*`, which needs the `OPS_TOKEN` secret. A restore saves
+  the replaced data under `pre-restore/` and keeps sessions. Adds a `reloadData()` seam to
+  `api/server.js`.
+
 ### Production deployment
+
+- 2026-10-04: version `37b6ac6d-aee4-403c-b141-fe0cfde0218c` adds the backup cron, the R2
+  binding and the ops routes. `OPS_TOKEN` is set. The first manual backup
+  (`manual/2026-10-05T00-36-16-280Z.json.gz`: 5 files, 1 user) was downloaded and decoded
+  independently. Without the token, `/__ops/*` answers 404.
 
 - 2026-10-04: version `5afd6e51-ed48-4b39-aada-da9e3d664c26` sets `ADMIN_UIDS` to the owner's
   profile and turns on `INVITE_ONLY`. `/api/config` reports `invite_only: true`, and signing up
