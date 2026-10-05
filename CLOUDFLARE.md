@@ -44,8 +44,10 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   codes, presence, rate-limit windows) is short-lived and may be lost on eviction. Upstream
   loses the same state on a restart.
 - **Request bodies are read in the Worker**, which Cloudflare runs as many isolates, before
-  the single Durable Object sees them: JSON up to 10 MB within 60 s (else 408), uploads up to
-  twice the largest media cap, and only after an RPC session check (`sessionValid`). A sender
+  the single Durable Object sees them. Without a valid session (checked over RPC,
+  `sessionValid`): at most 64 KB within 10 s. A request that carried credentials which failed the
+  check gets 401 when it is over that cap, the API's own answer for an expired session. Signed
+  in: JSON up to 10 MB within 60 s, and uploads up to twice the largest media cap. A sender
   that trickles bodies, from any number of addresses, occupies Worker requests, never the
   object. The object's own limits below stay as a second line.
 - **Request adapter.** `cloudflare/node-http.js` turns a fetch `Request` into the

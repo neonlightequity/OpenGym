@@ -56,6 +56,10 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
   addresses all ended at the Worker (408), and registration, sign-out and a 1.5 MB sync
   succeeded meanwhile (further background security findings on `4b14f8cc`).
 
+- The Worker gives the large body limits only to a valid session: anonymous bodies are capped at
+  64 KB within 10 s, and an expired session over that cap gets 401 (background security finding
+  on `1f91be76`).
+
 ### Production deployment
 
 - 2026-10-05: version `1f91be76-396c-4d30-b059-3bf8110c5b23` reads bodies in the Worker. Public

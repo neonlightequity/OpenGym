@@ -11,6 +11,9 @@ import { mediaLimits } from '../api/media.js';
 const MAX_JSON = 10 * 1024 * 1024;                    // 2 × api/server.js MAX_BODY
 const MEDIA_PUT = /^\/api\/media\/[0-9a-f]{64}$/;
 const JSON_DEADLINE_MS = 60000;                        // a few MB of JSON, even on a slow phone
+// Without a valid session a body is a sign-in, registration or pairing payload of a few KB.
+const ANON_CAP = 64 * 1024;
+const ANON_DEADLINE_MS = 10000;
 async function readWhole(request, cap, deadlineMs) {
   if (!request.body) return new Uint8Array(0);
   const declared = +(request.headers.get('content-length') || 0);
@@ -100,16 +103,24 @@ export default {
       let body = null;
       if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS') {
         const upload = request.method === 'PUT' && MEDIA_PUT.test(url.pathname);
+        // The large limits are for a signed-in profile only; the session is checked (one small
+        // RPC, no body) whenever the request carries credentials at all.
+        const cookie = request.headers.get('cookie'), auth = request.headers.get('authorization');
+        const signedIn = !!(cookie || auth) && await server(env).sessionValid(cookie, auth);
         // An upload body is only read for a signed-in profile (the route would answer 401 anyway).
-        if (upload && !(await server(env).sessionValid(request.headers.get('cookie'), request.headers.get('authorization')))) {
+        if (upload && !signedIn) {
           request.body?.cancel().catch(() => {});
           return withHeaders(Response.json({ error: 'not signed in' }, { status: 401 }));
         }
         const L = mediaLimits(env);
-        const cap = upload && L.enabled ? 2 * Math.ceil(Math.max(L.imageMB, L.gifMB, L.videoMB) * 1024 * 1024) : MAX_JSON;
+        const cap = !signedIn ? ANON_CAP
+          : upload && L.enabled ? 2 * Math.ceil(Math.max(L.imageMB, L.gifMB, L.videoMB) * 1024 * 1024) : MAX_JSON;
         // Uploads over a slow uplink may take long (upstream allows half an hour); they occupy
         // only this Worker request while they do.
-        body = await readWhole(request, cap, upload ? 0 : JSON_DEADLINE_MS);
+        body = await readWhole(request, cap, !signedIn ? ANON_DEADLINE_MS : upload ? 0 : JSON_DEADLINE_MS);
+        // Over the anonymous cap with credentials that did not check out: an expired or revoked
+        // session, which the API itself would answer with 401 — the app's cue to sign in again.
+        if (body === null && !signedIn && (cookie || auth)) return withHeaders(Response.json({ error: 'not signed in' }, { status: 401 }));
         if (body === null) return withHeaders(Response.json({ error: 'body too large' }, { status: 413 }));
         if (body === 'late') return withHeaders(Response.json({ error: 'request body took too long' }, { status: 408 }));
         headers.delete('transfer-encoding');
