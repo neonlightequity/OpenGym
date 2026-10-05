@@ -1,0 +1,5 @@
+# Copy to .dev.vars for `npm run cf:dev` (never commit .dev.vars).
+RP_ID=localhost
+ORIGIN=http://localhost:8787
+VAPID_SUBJECT=mailto:admin@localhost
+PASSWORD_LOGIN=1

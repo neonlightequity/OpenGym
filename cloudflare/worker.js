@@ -1,9 +1,9 @@
 // Cloudflare Worker entry for gym.davidovichequity.com (fork-owned; see CLOUDFLARE.md).
-// Serves the built frontend from static assets and answers /api/*. Until the API port to
-// Workers lands, /api answers as an instance that only offers guest mode, so the app boots
-// to "Continue without account" instead of a dead sign-in screen.
+// Serves the built frontend from static assets and hands /api/* to the OpenGymServer Durable
+// Object, which runs api/server.js.
+export { OpenGymServer } from './server-do.js';
 
-// The headers web/nginx.conf.template sets on every response.
+// The headers web/nginx.conf.template sets on every response, plus HSTS (TLS ends here).
 const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
@@ -11,16 +11,6 @@ const SECURITY_HEADERS = {
   'Content-Security-Policy': "frame-ancestors 'none'",
   'Strict-Transport-Security': 'max-age=31536000'
 };
-
-const json = (status, body) =>
-  new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
-
-function api(request, url) {
-  if (request.method === 'GET' && url.pathname === '/api/config') return json(200, { invite_only: false, allow_guest: true });
-  if (request.method === 'GET' && url.pathname === '/api/health') return json(200, { ok: true, users: 0 });
-  if (request.method === 'GET' && url.pathname === '/api/me') return json(401, { error: 'not signed in' });
-  return json(503, { error: 'accounts are not available on this instance yet' });
-}
 
 function withHeaders(response) {
   const out = new Response(response.body, response);
@@ -31,7 +21,15 @@ function withHeaders(response) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/')) return withHeaders(api(request, url));
+    if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+      // nginx overwrote these with the real peer; do the same so the client cannot choose them.
+      const headers = new Headers(request.headers);
+      const ip = request.headers.get('cf-connecting-ip') || '';
+      headers.set('x-forwarded-for', ip);
+      headers.set('x-real-ip', ip);
+      const stub = env.OPENGYM.get(env.OPENGYM.idFromName('main'));
+      return withHeaders(await stub.fetch(new Request(request, { headers })));
+    }
     return withHeaders(await env.ASSETS.fetch(request));
   }
 };

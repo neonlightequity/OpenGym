@@ -2,7 +2,7 @@
    No framework, JSON-file storage, signed session cookies.               */
 import http from 'node:http';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
+import fs from './fs.js';
 import path from 'node:path';
 import https from 'node:https';
 import dns from 'node:dns';
@@ -299,6 +299,7 @@ async function sendPush(userId, payload, deviceId) {
 const restTimers = new Map(); // `${userId}:${deviceId}` -> Timeout
 const restKey = (userId, deviceId) => `${userId}:${deviceId || ''}`;
 function scheduleRestTimer(userId, deviceId, sec, lang) {
+  if (globalThis.__opengymRestTimers) return globalThis.__opengymRestTimers.schedule(userId, deviceId, sec, lang);
   const k = restKey(userId, deviceId);
   const t = restTimers.get(k);
   if (t) clearTimeout(t);
@@ -308,6 +309,7 @@ function scheduleRestTimer(userId, deviceId, sec, lang) {
   }, sec * 1000));
 }
 function cancelRestTimer(userId, deviceId) {
+  if (globalThis.__opengymRestTimers) return globalThis.__opengymRestTimers.cancel(userId, deviceId);
   // no device id: an older client — clear everything the account has pending, as it always did
   for (const [k, t] of restTimers) {
     if (deviceId ? k === restKey(userId, deviceId) : k.startsWith(userId + ':')) { clearTimeout(t); restTimers.delete(k); }
@@ -315,6 +317,8 @@ function cancelRestTimer(userId, deviceId) {
 }
 // A device id is what the browser made up for itself (lib/push.js): one short token per browser
 // profile, nothing identifying. Anything else is treated as absent.
+// Where a host keeps rest timers outside this process (cloudflare/server-do.js), it fires them here.
+export const fireRestTimer = (userId, deviceId, lang) => sendPush(userId, restTimerPush(lang), deviceId);
 const deviceIdOf = v => (typeof v === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : undefined);
 
 // "Workout planned today" reminder — one per user per day, at their chosen time.
@@ -390,7 +394,8 @@ function readStateCached(uid) {
   while (stateCache.size > STATE_CACHE_MAX) stateCache.delete(stateCache.keys().next().value);
   return S;
 }
-setInterval(() => {
+export function reminderTick() {
+  const sent = [];
   for (const user of db.users) {
     if (!db.subs.some(s => s.userId === user.id)) continue;
     // One user's state file is one user's problem: a shape this tick cannot read is logged and
@@ -411,14 +416,17 @@ setInterval(() => {
       console.log('reminder firing', user.id, rid);
       user.lastReminder = now.date;
       saveDb();
-      sendPush(user.id, dayReminderPush(S.lang, routine));
+      sent.push(sendPush(user.id, dayReminderPush(S.lang, routine)));
     } catch (e) {
       console.error('reminder tick', user.id, e);
     }
   }
+  // The sends, for a caller that has to stay alive until they finish (a Workers alarm).
+  return Promise.allSettled(sent);
+}
 // Checked every 10s (not 60s) — ticks aren't aligned to the top of the minute, so a 60s
 // interval could sit on your target minute for up to 59s before noticing. 10s caps that at ~9s.
-}, REMINDER_TICK_MS).unref();
+setInterval(reminderTick, REMINDER_TICK_MS).unref?.();
 
 /* ---------- sessions (signed cookie) ---------- */
 function sign(payload) {
@@ -2387,7 +2395,7 @@ function bodyDeadline(req) {
   req.allowSlowBody = clear;
 }
 
-const server = http.createServer(async (req, res) => {
+export async function handle(req, res) {
   bodyDeadline(req);
   // Same-origin (the deployed nginx-proxied web app) never triggers CORS, so this only matters
   // for the paired mobile app calling in from its own WebView origin. It carries no cookie
@@ -2450,7 +2458,11 @@ const server = http.createServer(async (req, res) => {
     console.error(key, e);
     if (!res.headersSent) json(res, 500, { error: 'server error' });
   }
-});
+}
+// Whether anyone could receive a push — a host that wakes this process on a timer asks first.
+export const hasPushSubscribers = () => db.subs.length > 0;
+// A host that brings its own front end (cloudflare/server-do.js) imports handle() and listens itself.
+const server = globalThis.__opengymHost ? {} : http.createServer(handle);
 // Node's default of 300 s for a whole request would answer 408 to a 40 MB video on a ~1 Mbit/s
 // uplink. Half an hour covers that; a stalled upload is cut much sooner by its own 60 s idle
 // timer in media.js, a client that never finishes its headers still meets headersTimeout, and
@@ -2461,4 +2473,4 @@ server.headersTimeout = 60000;
 // port that was actually bound: with PORT=0 the OS picks one, and a caller that did not choose it
 // (the tests spawn the server that way, and so does anyone running two instances on one box) has
 // no other way to learn it.
-server.listen(PORT, () => console.log(`gym-api on :${server.address().port} (rpID=${RP_ID}, origin=${ORIGIN})`));
+if (!globalThis.__opengymHost) server.listen(PORT, () => console.log(`gym-api on :${server.address().port} (rpID=${RP_ID}, origin=${ORIGIN})`));

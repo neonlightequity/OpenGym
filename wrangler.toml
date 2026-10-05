@@ -16,5 +16,37 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
+# The whole API is one Durable Object (cloudflare/server-do.js); its SQLite storage holds what
+# ./data holds on a Docker install: db.json, state-<uid>.json, secret, vapid.json, audit.log.
+[[durable_objects.bindings]]
+name = "OPENGYM"
+class_name = "OpenGymServer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OpenGymServer"]
+
+# The Workers build swaps the npm web-push (node:https) for a WebCrypto + fetch implementation.
+[alias]
+"web-push" = "./cloudflare/web-push.js"
+
+# Bundled modules have no import.meta.url; the coach adapters read it at import (createRequire)
+# even though the coach is off. Any absolute file URL satisfies them.
+[define]
+"import.meta.url" = "\"file:///opengym/worker.js\""
+
+# api/server.js configuration (docs/SELF_HOSTING.md has the full contract). Local overrides go in
+# .dev.vars (see .dev.vars.example); secrets never go here.
+[vars]
+RP_ID = "gym.davidovichequity.com"
+RP_NAME = "openGym"
+ORIGIN = "https://gym.davidovichequity.com"
+VAPID_SUBJECT = "https://gym.davidovichequity.com"
+TRUST_PROXY = "1"
+# The AI Coach runs a local agent process; there is none on Workers.
+COACH_DISABLED = "1"
+# Custom-exercise photos/videos need a file store (R2 port pending, see ToDo.md).
+MEDIA_UPLOADS = "off"
+
 [observability]
 enabled = true

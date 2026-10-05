@@ -25,6 +25,9 @@ first. This file adds the fork's rules. `CLOUDFLARE.md` is the deployment runboo
 | Command | What it does |
 |---------|--------------|
 | `npm run cf:build` | Build `frontend/dist` with the jsDelivr media bases |
+| `npm run cf:dev` | Local Worker + Durable Object at http://localhost:8787 (copy `.dev.vars.example` to `.dev.vars`) |
+| `node cloudflare/smoke.mjs <url>` | API smoke test (`--public` for production) |
+| `npm run test:cf` | Web Push interoperability tests |
 | `npx wrangler deploy` | Deploy the Worker + assets to gym.davidovichequity.com |
 | `npm run sync:check` | Verify Git guidance/hooks match and run the sync helper tests |
 | `cd frontend && npm test` | Upstream frontend unit tests |
