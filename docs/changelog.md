@@ -10,11 +10,13 @@ in `ToDo.md` at the repository root.
 
 - Daily cron backup of all API data to the private R2 bucket `opengym-backups` (30 daily, 12
   monthly). Token-protected `/__ops` routes and `cloudflare/ops.mjs` list, take and restore
-  backups. Restore is transactional, saves `pre-restore/` first and keeps sessions. Adds a
+  backups. Restore is transactional, saves `pre-restore/` first and signs everyone out once (session versions bumped). A background
+  security review found that keeping sessions would revive revoked ones. Adds a
   `reloadData()` seam to `api/server.js`. The `OPS_TOKEN` copy on the MacBook is in
   `.git/opengym-ops-token`.
 - Verified locally: cron → backup → data changed → restore brings back the 3,000 workouts,
-  removes the profile created after the backup, keeps the session, and survives a restart.
+  removes the profile created after the backup, and survives a restart. After the fix, the old
+  session cookie is refused (401) and a fresh sign-in sees the restored data.
   Unit tests cover the format, malformed backups and retention over 500 days. The API suite
   is unchanged (same 3 Node 25 failures). Production: Worker `37b6ac6d`; a manual backup
   (1 user, 5 files) downloaded and decoded; `/__ops` is 404 without the token; public smoke

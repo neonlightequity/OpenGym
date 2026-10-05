@@ -119,7 +119,8 @@ export class OpenGymServer extends DurableObject {
   }
 
   // Replaces all API data with the backup at `key`. The current data is saved under
-  // pre-restore/ first. The session secret stays the current one, so devices stay signed in.
+  // pre-restore/ first. Everyone is signed out once (backup.bumpSessions), so a session that was
+  // revoked after the backup was taken cannot come back with it.
   async restoreBackup(key) {
     await this.boot;
     // Requests wait until the restore is done, so nothing written after the pre-restore
@@ -133,7 +134,10 @@ export class OpenGymServer extends DurableObject {
     const snap = await backup.decode(new Uint8Array(await obj.arrayBuffer()));
     const before = backup.snapshot(this.fs);
     const saved = await backup.put(this.env.BACKUPS, backup.stampKey('pre-restore', before), before);
-    this.fs.replaceAll(snap.files, [`${DATA_DIR}/secret`]);
+    const dbName = `${DATA_DIR}/db.json`;
+    const currentDb = before.files.find(f => f.name === dbName)?.text;
+    const files = snap.files.map(f => (f.name === dbName ? { ...f, text: backup.bumpSessions(f.text, currentDb) } : f));
+    this.fs.replaceAll(files, [`${DATA_DIR}/secret`]);
     this.api.reloadData();
     this.ctx.storage.sql.exec('DELETE FROM rest_timers');
     console.log('restored', key, 'previous data saved at', saved.key);

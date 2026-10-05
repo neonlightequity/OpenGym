@@ -66,8 +66,10 @@ Git. It is backed up to R2 (next section).
   (gzip JSON: `{format, version, createdAt, files: [{name, mtime, text}]}`).
 - **Restore** replaces all API data with the backup in one transaction while requests wait. It
   first saves the current data under `pre-restore/`, reloads it into the running server
-  (`reloadData()` seam), and clears pending rest timers. The current session secret is kept,
-  so signed-in devices stay signed in. Undo a restore by restoring its `pre-restore/` key.
+  (`reloadData()` seam), and clears pending rest timers. **Everyone is signed out once.** Every
+  profile's session version moves past both its backed-up and its current value, so no session
+  revoked after the backup was taken can come back. Passkeys removed since the backup do come
+  back with it, so check the passkey list after a restore. Undo a restore by restoring its `pre-restore/` key.
   Tested end to end locally (`wrangler dev --test-scheduled`). It has not been run against
   production data.
 

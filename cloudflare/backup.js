@@ -74,4 +74,17 @@ export async function scheduled(bucket, snap) {
   return { wrote, pruned };
 }
 
+// The restored db.json with every profile's session version (`sv`) moved past both its backed-up
+// and its current value. server.js accepts a session only at exactly the current `sv`, so this
+// signs everyone out once: no session issued before the backup and none revoked since (sign out
+// everywhere, a disabled profile) can come back with the restored records.
+export function bumpSessions(restoredDbText, currentDbText) {
+  const restored = JSON.parse(restoredDbText);
+  let current = {};
+  try { current = JSON.parse(currentDbText || '{}'); } catch { /* no usable current db */ }
+  const was = new Map((current.users || []).map(u => [u.id, u.sv || 0]));
+  for (const u of restored.users || []) u.sv = Math.max(u.sv || 0, was.get(u.id) || 0) + 1;
+  return JSON.stringify(restored, null, 2);
+}
+
 export const stampKey = (prefix, snap) => `${prefix}/${snap.createdAt.replace(/[:.]/g, '-')}.json.gz`;

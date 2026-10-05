@@ -28,10 +28,14 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 - Backups: a daily cron (03:17 UTC) snapshots all API data into the private R2 bucket
   `opengym-backups` (newest 30 daily and 12 monthly kept). `cloudflare/ops.mjs` lists, takes
   and restores backups through `/__ops/*`, which needs the `OPS_TOKEN` secret. A restore saves
-  the replaced data under `pre-restore/` and keeps sessions. Adds a `reloadData()` seam to
+  the replaced data under `pre-restore/` and signs everyone out once, so sessions revoked after
+  the backup cannot come back (found by a background security review). Adds a `reloadData()` seam to
   `api/server.js`.
 
 ### Production deployment
+
+- 2026-10-04: version `3302d490-f8c9-44fa-ad32-9f0a776b0513`: a restore signs everyone out.
+  Public smoke test passed; the ops list still answers.
 
 - 2026-10-04: version `37b6ac6d-aee4-403c-b141-fe0cfde0218c` adds the backup cron, the R2
   binding and the ops routes. `OPS_TOKEN` is set. The first manual backup

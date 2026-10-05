@@ -2463,7 +2463,7 @@ export async function handle(req, res) {
 export const hasPushSubscribers = () => db.subs.length > 0;
 // Re-reads what boot read from DATA_DIR, for a host that replaced the files underneath this
 // process (cloudflare/server-do.js restoring a backup). The session secret is not re-read: the
-// host keeps the current one, so signed-in devices stay signed in.
+// host keeps the current one (and moves every profile's `sv` on, which is what ends sessions).
 export function reloadData() {
   db = { users: [], creds: [], subs: [], invites: [] };
   try { db = JSON.parse(fs.readFileSync(dbFile, 'utf8')); } catch {}

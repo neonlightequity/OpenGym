@@ -55,3 +55,11 @@ test('scheduled runs keep the newest 30 daily and one object per month for 12 mo
   assert.equal(monthly.at(-1), 'monthly/2026-05.json.gz');
   assert.equal(bucket.m.get(daily.at(-1)).opts.customMetadata.users, '2');
 });
+
+test('a restore signs everyone out: sv moves past both the backed-up and the current value', () => {
+  const restored = JSON.stringify({ users: [{ id: 'a', sv: 2 }, { id: 'b' }, { id: 'gone-now' , sv: 5 }] });
+  const current = JSON.stringify({ users: [{ id: 'a', sv: 7 }, { id: 'b', sv: 0 }, { id: 'new-since' }] });
+  const out = JSON.parse(backup.bumpSessions(restored, current));
+  assert.deepEqual(out.users.map(u => [u.id, u.sv]), [['a', 8], ['b', 1], ['gone-now', 6]]);
+  assert.deepEqual(JSON.parse(backup.bumpSessions(restored, 'not json')).users.map(u => u.sv), [3, 1, 6]);
+});
