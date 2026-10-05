@@ -27,6 +27,9 @@ in `ToDo.md` at the repository root.
 - A further finding fixed in `882f5e7c`: anonymous bodies are capped at 64 KB, must arrive
   within 10 s, and are limited to 8 per address (local test: 8 trickling bodies → 408 at 10 s,
   the 9th → 429, the API kept answering).
+- Two more findings fixed in `4b14f8cc`: anonymous bodies share an 8 MB slice of the budget,
+  and an IPv6 /64 counts as one address. Flood test from 200 addresses: 136 held then 408, 63
+  answered 503, and a signed-in 1.5 MB sync succeeded meanwhile.
 - Open: restoring media from the R2 mirror; the owner trying an upload on a phone; Coach; push
   on a real phone.
 - Commits: `c3c9f4e`..HEAD.

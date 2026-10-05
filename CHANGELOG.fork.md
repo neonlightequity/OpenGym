@@ -53,6 +53,10 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 
 ### Production deployment
 
+- 2026-10-05: version `4b14f8cc-a695-4feb-b202-68f07b62fd4f` reserves the buffer budget for
+  signed-in requests. Public smoke test 5/5 (after one transient connect timeout from the
+  MacBook), and a backup holds 1 user.
+
 - 2026-10-05: version `882f5e7c-fa76-495d-a2b6-47d84df2ebb3` bounds anonymous bodies. Public
   smoke test passed, an anonymous 100 KB body is 413, and invite-only signup still answers 403.
 
