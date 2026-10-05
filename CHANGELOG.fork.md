@@ -45,6 +45,10 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 
 ### Production deployment
 
+- 2026-10-05: version `06d35585-ae53-40a0-b81c-90ce386f7a58`: session check before upload
+  bodies, a 48 MB buffer budget, and expiry of mirrored media. Public smoke test passed, an
+  anonymous upload is 401, and a backup still holds 1 user.
+
 - 2026-10-05: version `2b16fd71-f7ea-47d3-8011-650cec4f7b51` turns media uploads on. The live
   storage migration (`fs_meta.bin`) kept all data: 1 user, and a manual backup of 5 files.
   `/api/config` advertises media, an upload without a session is 401, and the public smoke

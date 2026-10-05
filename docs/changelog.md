@@ -20,6 +20,10 @@ in `ToDo.md` at the repository root.
   0 uploads, an upload survives a restore, the API suite is unchanged (same 3 Node 25
   failures), `test:cf` 7/7. Production: config, 401 without a session, data intact after the
   table migration, backup ok.
+- Two more background security findings fixed in `06d35585`: upload bodies are read only for a
+  signed-in session, there is a shared 48 MB buffer budget (local test: 5 parallel 15 MB uploads
+  → 201 201 201 503 429, still healthy), and mirrored media expire from R2 30 days after the
+  upload is gone (unit-tested over 70 simulated days).
 - Open: restoring media from the R2 mirror; the owner trying an upload on a phone; Coach; push
   on a real phone.
 - Commits: `c3c9f4e`..HEAD.
