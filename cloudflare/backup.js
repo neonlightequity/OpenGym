@@ -90,16 +90,25 @@ export function bumpSessions(restoredDbText, currentDbText) {
 
 // Copies every stored upload to media/<uid>/<hash>.<ext> in the bucket, unless it is already
 // there. Uploads are named by their SHA-256, so an object under a name never changes, and one
-// already present needs no second copy. Mirrored objects are kept when the upload is deleted.
+// already present needs no second copy.
+//
+// A copy whose upload is gone (deleted by its owner, swept, or its profile deleted) is kept for
+// MEDIA_GONE_KEEP_MS, the same window as the daily backups, and then deleted, so the mirror does
+// not keep someone's photos for longer than the backups keep the rest of their data. `gone`
+// remembers since when each copy has had no upload: { get(key), set(key, t), delete(key), keys() }.
+export const MEDIA_GONE_KEEP_MS = DAILY_KEEP * 86400000;
 const MEDIA_FILE = /^([A-Za-z0-9_-]+)\/([0-9a-f]{64}\.(?:jpg|png|webp|gif|mp4|mov|webm))$/;
-export async function mirrorMedia(bucket, fs, uploadsDir) {
-  const out = { copied: 0, present: 0, bytes: 0 };
+export async function mirrorMedia(bucket, fs, uploadsDir, gone, now = Date.now()) {
+  const out = { copied: 0, present: 0, bytes: 0, expiring: 0, deleted: 0 };
   const prefix = uploadsDir.replace(/\/+$/, '') + '/';
+  const local = new Set();
   for (const f of fs.listFiles()) {
     if (!f.bin || !f.name.startsWith(prefix)) continue;
     const m = MEDIA_FILE.exec(f.name.slice(prefix.length));
     if (!m) continue;   // .tmp/ and anything that is not a finished upload
     const key = `media/${m[1]}/${m[2]}`;
+    local.add(key);
+    gone.delete(key);
     if (await bucket.head(key)) { out.present++; continue; }
     const bytes = fs.readBytes(f.name);
     if (!bytes) continue;   // deleted since the listing
@@ -107,6 +116,20 @@ export async function mirrorMedia(bucket, fs, uploadsDir) {
     out.copied++;
     out.bytes += bytes.length;
   }
+  const expired = [];
+  for (const key of await listAll(bucket, 'media/')) {
+    if (local.has(key)) continue;
+    const since = gone.get(key);
+    if (since == null) { gone.set(key, now); out.expiring++; continue; }
+    if (now - since >= MEDIA_GONE_KEEP_MS) expired.push(key);
+    else out.expiring++;
+  }
+  for (let i = 0; i < expired.length; i += 1000) await bucket.delete(expired.slice(i, i + 1000));
+  for (const key of expired) gone.delete(key);
+  // Marks for copies that no longer exist in the bucket (deleted by hand) are dropped too.
+  const inBucket = new Set(await listAll(bucket, 'media/'));
+  for (const key of gone.keys()) if (!inBucket.has(key)) gone.delete(key);
+  out.deleted = expired.length;
   return out;
 }
 

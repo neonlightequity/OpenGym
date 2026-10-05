@@ -38,6 +38,11 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
   (`media/<uid>/<hash>.<ext>`) once, and restores keep stored uploads. The Worker no longer
   overwrites a response's own CSP, so media keep `default-src 'none'; sandbox`.
 
+- Hardening from background security reviews of the media commit: upload bodies are read only
+  for a signed-in session (anyone else gets 401 before the body is read), and requests in flight
+  share a 48 MB buffer budget (503 past it). Mirrored media are deleted from R2 30 days after
+  their upload is gone.
+
 ### Production deployment
 
 - 2026-10-05: version `2b16fd71-f7ea-47d3-8011-650cec4f7b51` turns media uploads on. The live

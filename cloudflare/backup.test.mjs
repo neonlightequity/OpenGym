@@ -63,3 +63,40 @@ test('a restore signs everyone out: sv moves past both the backed-up and the cur
   assert.deepEqual(out.users.map(u => [u.id, u.sv]), [['a', 8], ['b', 1], ['gone-now', 6]]);
   assert.deepEqual(JSON.parse(backup.bumpSessions(restored, 'not json')).users.map(u => u.sv), [3, 1, 6]);
 });
+
+test('mirrored media: copied once, and deleted 30 days after the upload is gone', async () => {
+  const bucket = memoryBucket();
+  const marks = new Map();
+  const gone = { get: k => marks.get(k), set: (k, t) => marks.set(k, t), delete: k => marks.delete(k), keys: () => [...marks.keys()] };
+  const h1 = 'a'.repeat(64), h2 = 'b'.repeat(64);
+  const files = { [`/data/uploads/u1/${h1}.jpg`]: Buffer.from('one'), [`/data/uploads/u1/${h2}.mp4`]: Buffer.from('two'), '/data/uploads/u1/.gc.json': '{}' };
+  const mfs = {
+    listFiles: () => Object.keys(files).map(name => ({ name, mtime: 1, bin: typeof files[name] !== 'string' ? 1 : 0 })),
+    readBytes: name => files[name] ?? null
+  };
+  const day = 86400000, t0 = Date.UTC(2026, 0, 1);
+  let r = await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0);
+  assert.equal(r.copied, 2);
+  r = await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + day);
+  assert.deepEqual([r.copied, r.present], [0, 2]);
+
+  delete files[`/data/uploads/u1/${h2}.mp4`];                       // the owner deletes the video
+  r = await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + 2 * day);
+  assert.deepEqual([r.expiring, r.deleted], [1, 0]);
+  r = await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + 31 * day);
+  assert.deepEqual([r.expiring, r.deleted], [1, 0]);                // 29 days since it went
+  r = await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + 32 * day);
+  assert.equal(r.deleted, 1);
+  assert.deepEqual([...bucket.m.keys()], [`media/u1/${h1}.jpg`]);
+  assert.equal(marks.size, 0);
+
+  // A file that comes back within the window (uploaded again) is kept, and its mark cleared.
+  files[`/data/uploads/u1/${h2}.mp4`] = Buffer.from('two');
+  await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + 33 * day);
+  delete files[`/data/uploads/u1/${h2}.mp4`];
+  await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + 34 * day);
+  files[`/data/uploads/u1/${h2}.mp4`] = Buffer.from('two');
+  r = await backup.mirrorMedia(bucket, mfs, '/data/uploads', gone, t0 + 70 * day);
+  assert.equal(r.deleted, 0);
+  assert.equal(marks.size, 0);
+});

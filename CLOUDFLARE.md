@@ -30,7 +30,9 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   the same Durable Object storage (1 MB BLOB chunks; `do-fs.js` also emulates directories, file
   descriptors and streams for it). An upload is held in memory whole, so `MEDIA_VIDEO_MAX_MB` is
   16, not upstream's 40. The Durable Object accepts media bodies up to twice the largest cap so
-  `media.js` can answer an oversized one itself.
+  `media.js` can answer an oversized one itself. That larger cap applies only to a signed-in
+  request: the Durable Object checks the session before reading an upload body. All requests in
+  flight may buffer at most 48 MB together; past that a request gets 503 with `Retry-After`.
 - **Timers.** Durable Objects are evicted when idle, so in-memory timers cannot be relied on.
   Rest-timer pushes are rows in the `rest_timers` table. The reminder tick runs from the
   object's alarm every minute while anyone has a push subscription. The alarm is re-armed
@@ -64,7 +66,9 @@ Git. It is backed up to R2 (next section).
   `monthly/<YYYY-MM>.json.gz` on a month's first run (newest 12 kept). `manual/` and
   `pre-restore/` objects are never pruned.
 - **Media** are copied by the same nightly run to `media/<uid>/<sha256>.<ext>`, each only once
-  because names are content hashes. Mirrored copies are kept after the upload is deleted. A
+  because names are content hashes. A copy whose upload is gone (deleted, swept, or its profile
+  deleted) is deleted from R2 30 days later, the daily-backup window. Monthly JSON backups still
+  hold a deleted profile's records for up to 12 months. A
   restore leaves the uploads currently stored in place (JSON backups do not carry them).
   Restoring media from R2 has no command yet (see `ToDo.md`).
 - **Operator routes** `/__ops/backups` (GET), `/__ops/backup` (POST) and

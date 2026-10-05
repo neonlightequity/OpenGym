@@ -2461,6 +2461,9 @@ export async function handle(req, res) {
 }
 // Whether anyone could receive a push — a host that wakes this process on a timer asks first.
 export const hasPushSubscribers = () => db.subs.length > 0;
+// Whether these request headers carry a valid session — for a host that must decide before it
+// reads a large body (cloudflare/server-do.js, uploads).
+export const hasSession = headers => !!readSession({ headers });
 // Re-reads what boot read from DATA_DIR, for a host that replaced the files underneath this
 // process (cloudflare/server-do.js restoring a backup). The session secret is not re-read: the
 // host keeps the current one (and moves every profile's `sv` on, which is what ends sessions).

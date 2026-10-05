@@ -13,20 +13,31 @@ const DATA_DIR = '/data';
 const MAX_BODY = 5 * 1024 * 1024;   // api/server.js MAX_BODY
 const MEDIA_PUT = /^\/api\/media\/[0-9a-f]{64}$/;
 const UPLOADS = `${DATA_DIR}/uploads`;
+// Bodies are read into memory before api/server.js sees them, in an isolate of 128 MB. All the
+// requests in flight together may hold at most this much; past it a request is refused (503)
+// instead of risking the object being reset with everyone's requests in it.
+const BUFFER_BUDGET = 48 * 1024 * 1024;
 const TICK_MS = 60000;              // reminders are owed for 15 minutes after their time
 
 // The request body, or null once it passes `cap` — read as a stream so a body sent without a
 // Content-Length is cut off at the cap instead of being buffered whole first.
-async function readBody(request, cap) {
+// `budget` is shared by every request in flight: { used }. Returns null past `cap`, 'busy'
+// when the shared budget would be exceeded. A body that is returned stays counted until the
+// caller releases it, when its request is done.
+async function readBody(request, cap, budget) {
   if (!request.body) return new Uint8Array(0);
   const reader = request.body.getReader();
   const chunks = []; let size = 0;
+  const refuse = result => { reader.cancel().catch(() => {}); budget.used -= size; return result; };
   for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > cap) { reader.cancel().catch(() => {}); return null; }
-    chunks.push(value);
+    let step;
+    try { step = await reader.read(); } catch (e) { budget.used -= size; throw e; }
+    if (step.done) break;
+    size += step.value.byteLength;
+    budget.used += step.value.byteLength;
+    if (size > cap) return refuse(null);
+    if (budget.used > BUFFER_BUDGET) return refuse('busy');
+    chunks.push(step.value);
   }
   const out = new Uint8Array(size); let o = 0;
   for (const c of chunks) { out.set(c, o); o += c.byteLength; }
@@ -37,6 +48,7 @@ export class OpenGymServer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.boot = ctx.blockConcurrencyWhile(() => this.start(env));
+    this.buffered = { used: 0 };
   }
 
   async start(env) {
@@ -79,13 +91,23 @@ export class OpenGymServer extends DurableObject {
   async fetch(request) {
     await this.boot;
     const path = new URL(request.url).pathname;
-    const cap = request.method === 'PUT' && MEDIA_PUT.test(path) && this.mediaCap ? this.mediaCap : 2 * MAX_BODY;
+    const upload = request.method === 'PUT' && MEDIA_PUT.test(path) && this.mediaCap > 0;
+    // An upload's large cap is only for a signed-in profile: anyone else is answered before a
+    // byte of the body is read (the same 401 the route itself would give).
+    if (upload && !this.api.hasSession(Object.fromEntries(request.headers))) {
+      request.body?.cancel().catch(() => {});
+      return Response.json({ error: 'not signed in' }, { status: 401 });
+    }
+    const cap = upload ? this.mediaCap : 2 * MAX_BODY;
     const declared = +(request.headers.get('content-length') || 0);
     if (declared > cap) return Response.json({ error: 'body too large' }, { status: 413 });
-    const body = await readBody(request, cap);
+    const body = await readBody(request, cap, this.buffered);
     if (!body) return Response.json({ error: 'body too large' }, { status: 413 });
+    if (body === 'busy') return Response.json({ error: 'the server is busy — try again in a moment', code: 'busy' }, { status: 503, headers: { 'Retry-After': '2' } });
     const ip = request.headers.get('cf-connecting-ip') || '';
-    const res = await runNodeHandler(this.api.handle, request, body, ip);
+    let res;
+    try { res = await runNodeHandler(this.api.handle, request, body, ip); }
+    finally { this.buffered.used -= body.byteLength; }
     await this.arm();
     return res;
   }
@@ -107,7 +129,15 @@ export class OpenGymServer extends DurableObject {
   async scheduledBackup() {
     await this.boot;
     const result = await backup.scheduled(this.env.BACKUPS, backup.snapshot(this.fs));
-    result.media = await backup.mirrorMedia(this.env.BACKUPS, this.fs, UPLOADS);
+    const sql = this.ctx.storage.sql;
+    sql.exec('CREATE TABLE IF NOT EXISTS media_mirror_gone (key TEXT PRIMARY KEY, since INTEGER NOT NULL)');
+    const gone = {
+      get: key => sql.exec('SELECT since FROM media_mirror_gone WHERE key = ?', key).toArray()[0]?.since,
+      set: (key, t) => sql.exec('INSERT OR REPLACE INTO media_mirror_gone (key, since) VALUES (?, ?)', key, t),
+      delete: key => sql.exec('DELETE FROM media_mirror_gone WHERE key = ?', key),
+      keys: () => sql.exec('SELECT key FROM media_mirror_gone').toArray().map(r => r.key)
+    };
+    result.media = await backup.mirrorMedia(this.env.BACKUPS, this.fs, UPLOADS, gone);
     console.log('backup', JSON.stringify(result));
     return result;
   }
