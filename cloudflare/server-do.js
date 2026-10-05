@@ -11,6 +11,24 @@ const DATA_DIR = '/data';
 const MAX_BODY = 5 * 1024 * 1024;   // api/server.js MAX_BODY
 const TICK_MS = 60000;              // reminders are owed for 15 minutes after their time
 
+// The request body, or null once it passes `cap` — read as a stream so a body sent without a
+// Content-Length is cut off at the cap instead of being buffered whole first.
+async function readBody(request, cap) {
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks = []; let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > cap) { reader.cancel().catch(() => {}); return null; }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(size); let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.byteLength; }
+  return out;
+}
+
 export class OpenGymServer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -52,8 +70,8 @@ export class OpenGymServer extends DurableObject {
     await this.boot;
     const declared = +(request.headers.get('content-length') || 0);
     if (declared > 2 * MAX_BODY) return Response.json({ error: 'body too large' }, { status: 413 });
-    const body = new Uint8Array(await request.arrayBuffer());
-    if (body.byteLength > 2 * MAX_BODY) return Response.json({ error: 'body too large' }, { status: 413 });
+    const body = await readBody(request, 2 * MAX_BODY);
+    if (!body) return Response.json({ error: 'body too large' }, { status: 413 });
     const ip = request.headers.get('cf-connecting-ip') || '';
     const res = await runNodeHandler(this.api.handle, request, body, ip);
     await this.arm();

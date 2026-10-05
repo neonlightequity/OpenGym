@@ -35,7 +35,9 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   before the handler runs; server.js applies its own 5 MB limit.
 - **Web Push** uses `@block65/webcrypto-web-push` (aes128gcm + VAPID), aliased in place of
   the npm `web-push`. Keys keep web-push's format. They are generated once, at first boot,
-  into `/data/vapid.json` in storage.
+  into `/data/vapid.json` in storage. Pushes go only to the browsers' push services
+  (FCM, Mozilla, Apple, WNS). Any other endpoint is answered as gone (410) and pruned, where
+  upstream checks for private addresses at connect time.
 
 ## Where data lives
 
@@ -81,5 +83,7 @@ production host and the CSRF guard refuses every POST.
 3. `node cloudflare/smoke.mjs https://gym.davidovichequity.com --public`, then load the app.
 4. Record the Worker version ID in `CHANGELOG.fork.md`.
 
-Rollback: `npx wrangler rollback <version-id>`. Storage is not rolled back.
+Rollback: `npx wrangler rollback <version-id>`. Storage is not rolled back. Versions before
+the Durable Object (`fa75cb58`, guest-only) predate the `v1` migration, so a rollback to one
+may be refused. The fallback is redeploying that commit's code.
 `[[migrations]]` tags are append-only: never edit or remove `v1`.

@@ -27,18 +27,55 @@ function setVapidDetails(subject, publicKey, privateKey) {
   vapid = { subject, publicKey, privateKey };
 }
 
+// The browsers' push services. Upstream refuses private addresses at connect time; a Worker
+// cannot reach those anyway, but would otherwise POST to any public URL a signed-in user names.
+// An endpoint elsewhere is answered like a dead subscription (410), so server.js prunes it.
+const PUSH_HOSTS = [
+  'fcm.googleapis.com',                 // Chrome, Edge, Android
+  'updates.push.services.mozilla.com',  // Firefox
+  'push.apple.com',                     // Safari / iOS (web.push.apple.com)
+  'notify.windows.com'                  // legacy Edge (*.notify.windows.com)
+];
+const allowedEndpoint = raw => {
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' && PUSH_HOSTS.some(h => u.hostname === h || u.hostname.endsWith('.' + h));
+  } catch { return false; }
+};
+
+// At most this much of a push service's answer is kept (it only goes into a log line).
+const MAX_ANSWER = 4096;
+async function readCapped(res) {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const chunks = []; let size = 0;
+  try {
+    while (size < MAX_ANSWER) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); size += value.byteLength;
+    }
+  } finally { reader.cancel().catch(() => {}); }
+  const all = new Uint8Array(size); let o = 0;
+  for (const c of chunks) { all.set(c, o); o += c.byteLength; }
+  return new TextDecoder().decode(all.subarray(0, MAX_ANSWER));
+}
+
 // Mirrors web-push's default TTL (four weeks): a briefly offline phone still gets the alert.
 const DEFAULT_TTL = 2419200;
 
 async function sendNotification(subscription, body, opts = {}) {
   if (!vapid) throw new Error('setVapidDetails was not called');
+  if (!allowedEndpoint(subscription.endpoint)) {
+    throw Object.assign(new Error('endpoint is not a known push service'), { statusCode: 410, body: 'endpoint not allowed' });
+  }
   const payload = await buildPushPayload(
     { data: body, options: { ttl: opts.TTL ?? DEFAULT_TTL, ...(opts.urgency ? { urgency: opts.urgency } : {}) } },
     { endpoint: subscription.endpoint, expirationTime: null, keys: subscription.keys },
     vapid
   );
   const res = await fetch(subscription.endpoint, { ...payload, signal: AbortSignal.timeout(opts.timeout || 10000) });
-  const text = await res.text().catch(() => '');
+  const text = await readCapped(res).catch(() => '');
   if (!res.ok) throw Object.assign(new Error(`push service answered ${res.status}`), { statusCode: res.status, body: text });
   return { statusCode: res.status, body: text, headers: Object.fromEntries(res.headers) };
 }

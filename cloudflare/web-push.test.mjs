@@ -19,7 +19,7 @@ test('payload decrypts with the subscriber keys and the JWT verifies with the VA
   const client = crypto.createECDH('prime256v1');
   client.generateKeys();
   const auth = crypto.randomBytes(16);
-  const sub = { endpoint: 'https://push.example.test/send/abc', keys: { p256dh: client.getPublicKey().toString('base64url'), auth: auth.toString('base64url') } };
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys: { p256dh: client.getPublicKey().toString('base64url'), auth: auth.toString('base64url') } };
 
   let seen;
   const realFetch = globalThis.fetch;
@@ -41,7 +41,7 @@ test('payload decrypts with the subscriber keys and the JWT verifies with the VA
   assert.equal(m[2], vapid.publicKey);
   const [hd, pl, sig] = m[1].split('.');
   const claims = JSON.parse(Buffer.from(pl, 'base64url'));
-  assert.equal(claims.aud, 'https://push.example.test');
+  assert.equal(claims.aud, 'https://fcm.googleapis.com');
   assert.equal(claims.sub, 'https://gym.davidovichequity.com');
   const pub = crypto.createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: Buffer.from(vapid.publicKey, 'base64url').subarray(1, 33).toString('base64url'), y: Buffer.from(vapid.publicKey, 'base64url').subarray(33).toString('base64url') }, format: 'jwk' });
   assert.ok(crypto.verify('sha256', Buffer.from(`${hd}.${pl}`), { key: pub, dsaEncoding: 'ieee-p1363' }, Buffer.from(sig, 'base64url')));
@@ -51,10 +51,27 @@ test('a refusal from the push service carries statusCode and body, like web-push
   const vapid = await generateVAPIDKeysAsync();
   webpush.setVapidDetails('mailto:a@b.c', vapid.publicKey, vapid.privateKey);
   const client = crypto.createECDH('prime256v1'); client.generateKeys();
-  const sub = { endpoint: 'https://push.example.test/x', keys: { p256dh: client.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } };
+  const sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/x', keys: { p256dh: client.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') } };
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response('gone', { status: 410 });
   try {
     await assert.rejects(webpush.sendNotification(sub, '{}'), e => e.statusCode === 410 && e.body === 'gone');
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('an endpoint outside the browsers\' push services is never fetched and reads as gone (410)', async () => {
+  const vapid = await generateVAPIDKeysAsync();
+  webpush.setVapidDetails('mailto:a@b.c', vapid.publicKey, vapid.privateKey);
+  const client = crypto.createECDH('prime256v1'); client.generateKeys();
+  const keys = { p256dh: client.getPublicKey().toString('base64url'), auth: crypto.randomBytes(16).toString('base64url') };
+  const realFetch = globalThis.fetch;
+  let called = 0;
+  globalThis.fetch = async () => { called++; return new Response('', { status: 201 }); };
+  try {
+    for (const endpoint of ['https://gym.davidovichequity.com/api/logout', 'https://evilfcm.googleapis.com.example/x', 'http://fcm.googleapis.com/fcm/send/x']) {
+      await assert.rejects(webpush.sendNotification({ endpoint, keys }, '{}'), e => e.statusCode === 410, endpoint);
+    }
+    await webpush.sendNotification({ endpoint: 'https://web.push.apple.com/QGx', keys }, '{}');
+  } finally { globalThis.fetch = realFetch; }
+  assert.equal(called, 1);
 });

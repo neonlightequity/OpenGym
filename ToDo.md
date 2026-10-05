@@ -14,6 +14,8 @@ Open work for Claude and Codex, across machines. Check items off when done.
       and the day reminder arrive (verified locally only against a test endpoint).
 - [ ] Three upstream API tests fail on Node 25 locally, on the untouched base too (media route
       session check; two password-change race tests). Re-check on Node 22, which upstream CI uses.
+- [ ] `do-fs` `appendFileSync` rewrites the whole audit log per event; switch to a chunk append
+      if sign-in latency or storage writes become noticeable.
 - [x] Port the API to Cloudflare (accounts, passkeys, sync, admin, push) — 2026-10-04, see `CLOUDFLARE.md`.
 - [x] Create the GitHub repository `neonlightequity/OpenGym` (public fork) — 2026-10-04.
 - [x] Serve the frontend from Workers static assets at gym.davidovichequity.com — 2026-10-04.
