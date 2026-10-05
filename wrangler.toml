@@ -43,6 +43,9 @@ RP_NAME = "openGym"
 ORIGIN = "https://gym.davidovichequity.com"
 VAPID_SUBJECT = "https://gym.davidovichequity.com"
 TRUST_PROXY = "1"
+# The owner's profile (admin dashboard, invite codes). New profiles need an invite code.
+ADMIN_UIDS = "ROFl0cz7ERY2iHBg"
+INVITE_ONLY = "1"
 # The AI Coach runs a local agent process; there is none on Workers.
 COACH_DISABLED = "1"
 # Custom-exercise photos/videos need a file store (R2 port pending, see ToDo.md).

@@ -6,6 +6,14 @@ next session can pick up without re-reading the whole git history. See
 `GIT_SYNC.md` item 8. Commit-level detail stays in `git log`; open work goes
 in `ToDo.md` at the repository root.
 
+## 2026-10-04 — Claude Code — MacBook — Owner admin, invite-only
+
+- Owner registered (profile `ROFl0cz7ERY2iHBg`). It is now `ADMIN_UIDS`, and `INVITE_ONLY = "1"`
+  is set in `wrangler.toml`. Deployed Worker `5afd6e51`.
+- Verified: `/api/config` reports `invite_only: true`, signup without a code answers 403, and the
+  instance has 1 user.
+- Open: Durable Object storage backup, R2 media, Coach, push on a real phone.
+
 ## 2026-10-04 — Claude Code — MacBook — Fork, Cloudflare hosting, API port
 
 - Forked DuarteSantos8/openGym to `neonlightequity/OpenGym` (public, AGPL §13); canonical

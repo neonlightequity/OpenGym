@@ -27,6 +27,10 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 
 ### Production deployment
 
+- 2026-10-04: version `5afd6e51-ed48-4b39-aada-da9e3d664c26` sets `ADMIN_UIDS` to the owner's
+  profile and turns on `INVITE_ONLY`. `/api/config` reports `invite_only: true`, and signing up
+  without a code answers 403. One profile exists.
+
 - 2026-10-04: Worker `opengym` version `043550d1-2014-4cf6-b882-3b870ec1d498`, the API on the
   `OpenGymServer` Durable Object (migration `v1`), from commit `d132933`. Production
   `smoke.mjs --public` passed 5/5, and `/api/register/options` returns
