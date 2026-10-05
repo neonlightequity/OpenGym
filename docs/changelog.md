@@ -24,6 +24,9 @@ in `ToDo.md` at the repository root.
   signed-in session, there is a shared 48 MB buffer budget (local test: 5 parallel 15 MB uploads
   → 201 201 201 503 429, still healthy), and mirrored media expire from R2 30 days after the
   upload is gone (unit-tested over 70 simulated days).
+- A further finding fixed in `882f5e7c`: anonymous bodies are capped at 64 KB, must arrive
+  within 10 s, and are limited to 8 per address (local test: 8 trickling bodies → 408 at 10 s,
+  the 9th → 429, the API kept answering).
 - Open: restoring media from the R2 mirror; the owner trying an upload on a phone; Coach; push
   on a real phone.
 - Commits: `c3c9f4e`..HEAD.
