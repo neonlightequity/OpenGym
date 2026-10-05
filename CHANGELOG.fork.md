@@ -51,6 +51,11 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
   counts an IPv6 /64 as one address. A sender with many addresses can no longer lock out
   signed-in users (two background security findings on `882f5e7c`).
 
+- Request bodies are read whole in the Worker before they reach the Durable Object, with a
+  session check over RPC before an upload body. Flood test: 200 stalled bodies from 200
+  addresses all ended at the Worker (408), and registration, sign-out and a 1.5 MB sync
+  succeeded meanwhile (further background security findings on `4b14f8cc`).
+
 ### Production deployment
 
 - 2026-10-05: version `4b14f8cc-a695-4feb-b202-68f07b62fd4f` reserves the buffer budget for

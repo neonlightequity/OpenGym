@@ -173,6 +173,12 @@ export class OpenGymServer extends DurableObject {
     await this.arm();
   }
 
+  // Called over RPC by the Worker before it reads an upload body: only the session headers.
+  async sessionValid(cookie, authorization) {
+    await this.boot;
+    return this.api.hasSession({ cookie: cookie || undefined, authorization: authorization || undefined });
+  }
+
   // Backups (cloudflare/backup.js), called over RPC by the Worker: the daily cron and the
   // token-protected /__ops routes. Each snapshot is taken with no await in between.
   async scheduledBackup() {

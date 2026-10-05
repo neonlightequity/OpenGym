@@ -43,6 +43,11 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   after every request and every alarm. The other in-memory state (passkey challenges, pairing
   codes, presence, rate-limit windows) is short-lived and may be lost on eviction. Upstream
   loses the same state on a restart.
+- **Request bodies are read in the Worker**, which Cloudflare runs as many isolates, before
+  the single Durable Object sees them: JSON up to 10 MB within 60 s (else 408), uploads up to
+  twice the largest media cap, and only after an RPC session check (`sessionValid`). A sender
+  that trickles bodies, from any number of addresses, occupies Worker requests, never the
+  object. The object's own limits below stay as a second line.
 - **Request adapter.** `cloudflare/node-http.js` turns a fetch `Request` into the
   `req`/`res` members server.js uses and returns a `Response`. Bodies are capped at 2 × 5 MB
   before the handler runs; server.js applies its own 5 MB limit.
