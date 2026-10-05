@@ -6,6 +6,24 @@ next session can pick up without re-reading the whole git history. See
 `GIT_SYNC.md` item 8. Commit-level detail stays in `git log`; open work goes
 in `ToDo.md` at the repository root.
 
+## 2026-10-05 — Claude Code — MacBook — Custom-exercise media; restore signs everyone out
+
+- Restore fix (from a background security review): a restore now bumps every profile's session
+  version, so sessions revoked after a backup cannot come back. Worker `3302d490`, commit
+  `c3c9f4e`.
+- Custom-exercise photos and videos are on. `api/media.js` now imports `./fs.js`. `do-fs`
+  gained binary files, directories, fds and streams, and `Res` is a Writable. The video cap is
+  16 MB. Uploads are left out of JSON backups and mirrored to R2 nightly, and a restore keeps
+  them. Worker `2b16fd71`, commit `5ad37a8`.
+- Verified locally: `media-smoke.mjs` 15/15 (incl. a 15 MB video round trip, caps, hash
+  mismatch, missing, sweep), mirror copies once and then finds them present, JSON backup holds
+  0 uploads, an upload survives a restore, the API suite is unchanged (same 3 Node 25
+  failures), `test:cf` 7/7. Production: config, 401 without a session, data intact after the
+  table migration, backup ok.
+- Open: restoring media from the R2 mirror; the owner trying an upload on a phone; Coach; push
+  on a real phone.
+- Commits: `c3c9f4e`..HEAD.
+
 ## 2026-10-04 — Claude Code — MacBook — Backups to R2
 
 - Daily cron backup of all API data to the private R2 bucket `opengym-backups` (30 daily, 12

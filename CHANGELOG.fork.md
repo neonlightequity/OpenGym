@@ -32,7 +32,18 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
   the backup cannot come back (found by a background security review). Adds a `reloadData()` seam to
   `api/server.js`.
 
+- Custom-exercise photo and video uploads work. Upstream's `media.js` runs unchanged apart from its
+  fs import, with bytes stored in Durable Object storage. Videos are capped at 16 MB (upstream:
+  40). JSON backups exclude uploads; the nightly run mirrors each one to R2
+  (`media/<uid>/<hash>.<ext>`) once, and restores keep stored uploads. The Worker no longer
+  overwrites a response's own CSP, so media keep `default-src 'none'; sandbox`.
+
 ### Production deployment
+
+- 2026-10-05: version `2b16fd71-f7ea-47d3-8011-650cec4f7b51` turns media uploads on. The live
+  storage migration (`fs_meta.bin`) kept all data: 1 user, and a manual backup of 5 files.
+  `/api/config` advertises media, an upload without a session is 401, and the public smoke
+  test passed.
 
 - 2026-10-04: version `3302d490-f8c9-44fa-ad32-9f0a776b0513`: a restore signs everyone out.
   Public smoke test passed; the ops list still answers.
