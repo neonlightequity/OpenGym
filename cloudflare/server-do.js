@@ -23,6 +23,18 @@ const BUFFER_BUDGET = 48 * 1024 * 1024;
 const ANON_CAP = 64 * 1024;
 const ANON_DEADLINE_MS = 10000;
 const ANON_PER_ADDRESS = 8;
+// All anonymous bodies together get this slice of BUFFER_BUDGET, so however many addresses a
+// sender has, signed-in requests always keep the rest.
+const ANON_BUDGET = 8 * 1024 * 1024;
+// One client may hold a whole IPv6 /64; it is counted as one address.
+const addressKey = ip => {
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.toLowerCase().split('::');
+  const h = head ? head.split(':') : [];
+  const t = tail ? tail.split(':') : [];
+  const groups = ip.includes('::') ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill('0'), ...t] : h;
+  return groups.slice(0, 4).map(g => g.replace(/^0+(?=.)/, '')).join(':') + '::/64';
+};
 const TICK_MS = 60000;              // reminders are owed for 15 minutes after their time
 
 // The request body, or null once it passes `cap` — read as a stream so a body sent without a
@@ -30,11 +42,12 @@ const TICK_MS = 60000;              // reminders are owed for 15 minutes after t
 // `budget` is shared by every request in flight: { used }. Returns null past `cap`, 'busy'
 // when the shared budget would be exceeded. A body that is returned stays counted until the
 // caller releases it, when its request is done.
-async function readBody(request, cap, budget, deadlineMs = 0) {
+async function readBody(request, cap, budget, deadlineMs = 0, pool = null) {
   if (!request.body) return new Uint8Array(0);
   const reader = request.body.getReader();
   const chunks = []; let size = 0;
-  const refuse = result => { reader.cancel().catch(() => {}); budget.used -= size; return result; };
+  const release = () => { budget.used -= size; if (pool) pool.used -= size; };
+  const refuse = result => { reader.cancel().catch(() => {}); release(); return result; };
   const until = deadlineMs ? Date.now() + deadlineMs : 0;
   for (;;) {
     let step, timer;
@@ -43,14 +56,15 @@ async function readBody(request, cap, budget, deadlineMs = 0) {
       step = until
         ? await Promise.race([next, new Promise(r => { timer = setTimeout(() => r('late'), Math.max(0, until - Date.now())); })])
         : await next;
-    } catch (e) { budget.used -= size; throw e; }
+    } catch (e) { release(); throw e; }
     finally { clearTimeout(timer); }
     if (step === 'late') return refuse('late');
     if (step.done) break;
     size += step.value.byteLength;
     budget.used += step.value.byteLength;
+    if (pool) pool.used += step.value.byteLength;
     if (size > cap) return refuse(null);
-    if (budget.used > BUFFER_BUDGET) return refuse('busy');
+    if (budget.used > BUFFER_BUDGET || (pool && pool.used > pool.max)) return refuse('busy');
     chunks.push(step.value);
   }
   const out = new Uint8Array(size); let o = 0;
@@ -58,12 +72,15 @@ async function readBody(request, cap, budget, deadlineMs = 0) {
   return out;
 }
 
+export { addressKey };
+
 export class OpenGymServer extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.boot = ctx.blockConcurrencyWhile(() => this.start(env));
     this.buffered = { used: 0 };
-    this.anonReads = new Map();   // address -> anonymous bodies being read now
+    this.anonReads = new Map();   // address (IPv6: its /64) -> anonymous bodies being read now
+    this.anonPool = { used: 0, max: ANON_BUDGET };
   }
 
   async start(env) {
@@ -117,17 +134,18 @@ export class OpenGymServer extends DurableObject {
     const declared = +(request.headers.get('content-length') || 0);
     if (declared > cap) return drop(Response.json({ error: 'body too large' }, { status: 413 }));
     const anonymous = !signedIn && !!request.body;
+    const addr = addressKey(ip);
     if (anonymous) {
-      const n = this.anonReads.get(ip) || 0;
+      const n = this.anonReads.get(addr) || 0;
       if (n >= ANON_PER_ADDRESS) return drop(Response.json({ error: 'too many requests', code: 'rate' }, { status: 429, headers: { 'Retry-After': '5' } }));
-      this.anonReads.set(ip, n + 1);
+      this.anonReads.set(addr, n + 1);
     }
     let body;
-    try { body = await readBody(request, cap, this.buffered, anonymous ? ANON_DEADLINE_MS : 0); }
+    try { body = await readBody(request, cap, this.buffered, anonymous ? ANON_DEADLINE_MS : 0, anonymous ? this.anonPool : null); }
     finally {
       if (anonymous) {
-        const n = (this.anonReads.get(ip) || 1) - 1;
-        if (n > 0) this.anonReads.set(ip, n); else this.anonReads.delete(ip);
+        const n = (this.anonReads.get(addr) || 1) - 1;
+        if (n > 0) this.anonReads.set(addr, n); else this.anonReads.delete(addr);
       }
     }
     if (!body) return Response.json({ error: 'body too large' }, { status: 413 });
@@ -135,7 +153,10 @@ export class OpenGymServer extends DurableObject {
     if (body === 'busy') return Response.json({ error: 'the server is busy — try again in a moment', code: 'busy' }, { status: 503, headers: { 'Retry-After': '2' } });
     let res;
     try { res = await runNodeHandler(this.api.handle, request, body, ip); }
-    finally { this.buffered.used -= body.byteLength; }
+    finally {
+      this.buffered.used -= body.byteLength;
+      if (anonymous) this.anonPool.used -= body.byteLength;
+    }
     await this.arm();
     return res;
   }

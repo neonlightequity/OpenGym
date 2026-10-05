@@ -47,6 +47,10 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
   address, so the shared buffer budget cannot be held without an account (background security
   review of `06d35585`).
 
+- Anonymous bodies together use at most 8 MB of the buffer budget, and the per-address limit
+  counts an IPv6 /64 as one address. A sender with many addresses can no longer lock out
+  signed-in users (two background security findings on `882f5e7c`).
+
 ### Production deployment
 
 - 2026-10-05: version `882f5e7c-fa76-495d-a2b6-47d84df2ebb3` bounds anonymous bodies. Public

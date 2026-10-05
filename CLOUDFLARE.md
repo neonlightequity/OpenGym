@@ -34,8 +34,9 @@ browser ──► Worker `opengym` (cloudflare/worker.js)
   request: the Durable Object checks the session before reading an upload body. All requests in
   flight may buffer at most 48 MB together; past that a request gets 503 with `Retry-After`.
   A request without a session may send at most 64 KB, must finish sending it within 10 s (408),
-  and one address may have at most 8 such bodies in flight (429), so the budget cannot be held
-  without an account.
+  and one address (an IPv6 /64 counts as one) may have at most 8 such bodies in flight (429).
+  All anonymous bodies together get at most 8 MB of the budget, so signed-in requests always
+  keep 40 MB however many addresses a sender uses.
 - **Timers.** Durable Objects are evicted when idle, so in-memory timers cannot be relied on.
   Rest-timer pushes are rows in the `rest_timers` table. The reminder tick runs from the
   object's alarm every minute while anyone has a push subscription. The alarm is re-armed
