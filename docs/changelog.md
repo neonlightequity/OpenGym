@@ -34,6 +34,8 @@ in `ToDo.md` at the repository root.
   reach the single Durable Object (flood test: 200/200 stalled bodies → 408 at the Worker, and
   sign-in, registration and a 1.5 MB sync unaffected). Further availability hardening belongs
   at the edge (Cloudflare rate-limiting/WAF rules), not in more in-object limits.
+- `f17cb22b`: the Worker also caps anonymous bodies (64 KB, 10 s) and checks the session over
+  RPC before granting larger limits; an expired session over the cap gets 401.
 - Open: restoring media from the R2 mirror; the owner trying an upload on a phone; Coach; push
   on a real phone.
 - Commits: `c3c9f4e`..HEAD.

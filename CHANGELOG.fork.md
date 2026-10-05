@@ -62,6 +62,9 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 
 ### Production deployment
 
+- 2026-10-05: version `f17cb22b-3e82-47a8-8ba3-472b4d7df811` adds anonymous body limits in the Worker. Public smoke test passed, an
+  anonymous 200 KB body is 413, and a backup holds 1 user.
+
 - 2026-10-05: version `1f91be76-396c-4d30-b059-3bf8110c5b23` reads bodies in the Worker. Public
   smoke test passed, an anonymous upload is 401, invite-only signup still answers 403, and a
   backup holds 1 user.
