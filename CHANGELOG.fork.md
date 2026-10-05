@@ -27,5 +27,11 @@ gym.davidovichequity.com. Upstream application changes are in `CHANGELOG.md`.
 
 ### Production deployment
 
+- 2026-10-04: Worker `opengym` version `043550d1-2014-4cf6-b882-3b870ec1d498`, the API on the
+  `OpenGymServer` Durable Object (migration `v1`), from commit `d132933`. Production
+  `smoke.mjs --public` passed 5/5, and `/api/register/options` returns
+  `rp.id = gym.davidovichequity.com`. No account was created. Signup stays open until the
+  owner registers (see `ToDo.md`).
+
 - 2026-10-04: Worker `opengym` version `fa75cb58-11a7-450a-b1dd-3a05b33cdcfc` on the
   `gym.davidovichequity.com` custom domain (based on upstream `1350409`, v1.3.9).

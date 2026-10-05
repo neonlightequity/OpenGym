@@ -65,7 +65,7 @@ Disabled on Workers:
 
 | Command | What it does |
 |---------|--------------|
-| `npm ci && (cd frontend && npm ci) && (cd api && npm ci)` | Install (root has wrangler + web-push lib) |
+| `npm run cf:install` | Install root (wrangler, web-push lib), `frontend/` and `api/` dependencies; the bundle needs all three |
 | `npm run cf:build` | Build `frontend/dist` with exercise media from the pinned jsDelivr dataset |
 | `cp .dev.vars.example .dev.vars && npm run cf:dev` | Local Worker at http://localhost:8787 with persistent local storage in `.wrangler/state` |
 | `node cloudflare/smoke.mjs http://localhost:8787` | Full API smoke test (needs `PASSWORD_LOGIN=1`, as in `.dev.vars.example`) |
